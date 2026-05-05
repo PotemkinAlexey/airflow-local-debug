@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pytest
@@ -68,19 +68,37 @@ def test_serialize_datetime_falls_back_to_str_for_unsupported() -> None:
 # --- _coerce_logical_date -------------------------------------------------
 
 
-def test_coerce_logical_date_passthrough_and_iso() -> None:
+def test_coerce_logical_date_returns_none_for_none_or_blank() -> None:
     assert runner._coerce_logical_date(None) is None
-    moment = datetime(2026, 5, 5, 9, 30)
-    assert runner._coerce_logical_date(moment) is moment
-    assert runner._coerce_logical_date(date(2026, 5, 5)) == datetime(2026, 5, 5)
+    assert runner._coerce_logical_date("") is None
+
+
+def test_coerce_logical_date_makes_naive_datetime_tz_aware() -> None:
+    naive = datetime(2026, 5, 5, 9, 30)
+    coerced = runner._coerce_logical_date(naive)
+    assert coerced == datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc)
+    assert coerced.tzinfo is timezone.utc
+
+
+def test_coerce_logical_date_preserves_existing_timezone() -> None:
+    aware = datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc)
+    coerced = runner._coerce_logical_date(aware)
+    assert coerced is aware
+
+
+def test_coerce_logical_date_handles_date_value() -> None:
+    coerced = runner._coerce_logical_date(date(2026, 5, 5))
+    assert coerced == datetime(2026, 5, 5, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_parses_date_only_string() -> None:
-    assert runner._coerce_logical_date("2026-05-05") == datetime(2026, 5, 5)
+    coerced = runner._coerce_logical_date("2026-05-05")
+    assert coerced == datetime(2026, 5, 5, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_parses_iso_string() -> None:
-    assert runner._coerce_logical_date("2026-05-05T11:00:00") == datetime(2026, 5, 5, 11, 0)
+    coerced = runner._coerce_logical_date("2026-05-05T11:00:00")
+    assert coerced == datetime(2026, 5, 5, 11, 0, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_rejects_garbage() -> None:

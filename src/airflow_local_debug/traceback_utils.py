@@ -237,8 +237,11 @@ def _classify_problem(
     message = str(message or "").lower()
     status = _maybe_int(status)
 
-    if (status in (408, 504, 524)) or _has_any(
-        message, "timeout", "timed out", "deadline exceeded", "request timed out"
+    if (
+        (status in (408, 504, 524))
+        or _has_any(class_name, "timeout")
+        or _has_word_any(message, "timeout")
+        or _has_any(message, "timed out", "deadline exceeded", "request timed out")
     ):
         return ("timeout",) + ERROR_STYLES["timeout"]
     if (status == 429) or _has_any(message, "rate limit", "too many requests", "throttl"):
