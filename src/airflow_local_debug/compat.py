@@ -22,6 +22,13 @@ def build_dag_test_kwargs(
     logical_date: datetime | None,
     conf: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    """
+    Build kwargs for `dag.test(...)` across Airflow versions.
+
+    Airflow 2.x exposed both `execution_date` and `logical_date`; Airflow 3
+    keeps only `logical_date`. When the signature is unreadable we prefer the
+    modern name — passing `execution_date` to Airflow 3 raises TypeError.
+    """
     kwargs: dict[str, Any] = {}
     try:
         sig = inspect.signature(dag.test)
@@ -34,7 +41,7 @@ def build_dag_test_kwargs(
         elif sig and "execution_date" in sig.parameters:
             kwargs["execution_date"] = logical_date
         else:
-            kwargs["execution_date"] = logical_date
+            kwargs["logical_date"] = logical_date
 
     if conf:
         if sig and "run_conf" in sig.parameters:
@@ -42,7 +49,7 @@ def build_dag_test_kwargs(
         elif sig and "conf" in sig.parameters:
             kwargs["conf"] = conf
         else:
-            kwargs["run_conf"] = conf
+            kwargs["conf"] = conf
 
     return kwargs
 

@@ -38,7 +38,7 @@ from airflow_local_debug.config_loader import get_default_config_path, load_loca
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph
 from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.models import LocalConfig, RunResult, TaskRunInfo
+from airflow_local_debug.models import LocalConfig, RunResult, TaskRunInfo, normalize_state
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -48,6 +48,8 @@ from airflow_local_debug.plugins import (
 )
 from airflow_local_debug.topology import topological_task_order as _topological_task_order
 from airflow_local_debug.traceback_utils import format_pretty_exception
+
+_log = logging.getLogger(__name__)
 
 _FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
 _UNFINISHED_TASK_STATES = {
@@ -105,7 +107,7 @@ def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
         task_runs.append(
             TaskRunInfo(
                 task_id=getattr(ti, "task_id", "<unknown>"),
-                state=str(getattr(ti, "state", None)) if getattr(ti, "state", None) is not None else None,
+                state=normalize_state(getattr(ti, "state", None)),
                 try_number=getattr(ti, "try_number", None),
                 map_index=getattr(ti, "map_index", None),
                 start_date=_serialize_datetime(getattr(ti, "start_date", None)),
@@ -127,12 +129,14 @@ def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
 def _best_effort_last_dagrun(dag: Any) -> Any | None:
     try:
         from airflow.models.dagrun import DagRun
-    except Exception:
+    except Exception as exc:
+        _log.debug("airflow.models.dagrun unavailable: %s", exc, exc_info=True)
         return None
 
     try:
         from airflow.utils.session import create_session
-    except Exception:
+    except Exception as exc:
+        _log.debug("airflow.utils.session unavailable: %s", exc, exc_info=True)
         create_session = None  # type: ignore[assignment]
 
     runs = None
@@ -143,12 +147,14 @@ def _best_effort_last_dagrun(dag: Any) -> Any | None:
                     runs = DagRun.find(dag_id=dag.dag_id, session=session)
                 except TypeError:
                     runs = DagRun.find(dag_id=dag.dag_id)
-        except Exception:
+        except Exception as exc:
+            _log.debug("DagRun.find via session failed for %s: %s", dag.dag_id, exc, exc_info=True)
             runs = None
     if runs is None:
         try:
             runs = DagRun.find(dag_id=dag.dag_id)
-        except Exception:
+        except Exception as exc:
+            _log.debug("DagRun.find without session failed for %s: %s", dag.dag_id, exc, exc_info=True)
             return None
 
     if not runs:
@@ -203,7 +209,7 @@ def _result_from_dagrun(
     result = RunResult(
         dag_id=dag.dag_id,
         run_id=getattr(dagrun, "run_id", None) if dagrun is not None else None,
-        state=str(state) if state is not None else None,
+        state=normalize_state(state),
         logical_date=logical_date,
         backend=backend,
         airflow_version=get_airflow_version(),
@@ -464,7 +470,19 @@ def _strict_dag_test(
         dr.dag = dag
 
         tasks = dag.task_dict
+        # Safety cap: if state machine never advances (deferred without trigger,
+        # bug in update_state), abort instead of spinning forever. Bounded at
+        # 10 iterations per task — generous for retry/reschedule progressions.
+        max_iterations = max(50, len(tasks) * 10)
+        iteration = 0
         while dr.state == DagRunState.RUNNING:
+            iteration += 1
+            if iteration > max_iterations:
+                dag.log.warning(
+                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
+                    max_iterations,
+                )
+                break
             session.expire_all()
             dr.dag = dag
             schedulable_tis, _ = dr.update_state(session=session)
@@ -1010,6 +1028,11 @@ def debug_dag_cli(
         action="store_true",
         help="Keep original task retry settings instead of forcing fail-fast local debug mode.",
     )
+    parser.add_argument(
+        "--include-graph-in-report",
+        action="store_true",
+        help="Include the rendered DAG graph in the final report (useful for sharing).",
+    )
     args = parser.parse_args(argv)
 
     if require_config_path and not args.config_path:
@@ -1021,6 +1044,7 @@ def debug_dag_cli(
         logical_date=args.logical_date,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
+        include_graph_in_report=args.include_graph_in_report,
         **kwargs,
     )
 
@@ -1062,6 +1086,11 @@ def debug_dag_file_cli(
         action="store_true",
         help="Keep original task retry settings instead of forcing fail-fast local debug mode.",
     )
+    parser.add_argument(
+        "--include-graph-in-report",
+        action="store_true",
+        help="Include the rendered DAG graph in the final report (useful for sharing).",
+    )
     args = parser.parse_args(argv)
 
     return debug_dag_from_file(
@@ -1071,6 +1100,7 @@ def debug_dag_file_cli(
         logical_date=args.logical_date,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
+        include_graph_in_report=args.include_graph_in_report,
     )
 
 

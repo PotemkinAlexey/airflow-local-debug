@@ -4,6 +4,25 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def normalize_state(state: Any) -> str | None:
+    """
+    Normalize an Airflow state value to a stable lowercase string.
+
+    Strips the `DagRunState.` / `TaskInstanceState.` prefix that some
+    Airflow / Python combinations emit via `str(enum_member)`.
+    """
+    if state is None:
+        return None
+    text = str(state).strip()
+    if not text:
+        return None
+    if "." in text:
+        prefix, _, suffix = text.partition(".")
+        if prefix.endswith("State") and suffix:
+            text = suffix
+    return text.lower()
+
+
 @dataclass
 class LocalConfig:
     source_path: str | None = None
@@ -43,7 +62,4 @@ class RunResult:
     def ok(self) -> bool:
         if self.exception is not None:
             return False
-        state = (self.state or "").strip().lower()
-        if state.startswith("dagrunstate."):
-            state = state[len("dagrunstate.") :]
-        return state == "success"
+        return normalize_state(self.state) == "success"

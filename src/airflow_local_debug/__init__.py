@@ -1,19 +1,59 @@
 """
 Local debug toolkit for ordinary Airflow DAGs.
 
-The package is intentionally small:
-- `debug_dag(...)` / `debug_dag_from_file(...)` are the one-call entrypoints
-- `debug_dag_cli(...)` is the reusable `python my_dag.py --config-path ...` entrypoint
-- `debug_dag_file_cli(...)` is the reusable file-based entrypoint for any DAG file
-- `run_full_dag(...)` / `run_full_dag_from_file(...)` return `RunResult`
-- `AirflowDebugPlugin` lets callers hook into per-task lifecycle events
+Entrypoints
+-----------
+- `debug_dag(dag, ...)` — run + print report (typical for inline use)
+- `debug_dag_from_file(path, ...)` — same, but loads the DAG from a file
+- `debug_dag_cli(dag)` — argparse wrapper for `python my_dag.py ...`
+- `debug_dag_file_cli()` — argparse wrapper for the `airflow-debug-run` script
+- `run_full_dag(dag, ...)` / `run_full_dag_from_file(...)` — return raw `RunResult`
 
-Typical usage:
+Result object
+-------------
+`RunResult` exposes:
+- `.ok` — True only if state == "success" and no exception
+- `.state`, `.exception`, `.tasks` (list of `TaskRunInfo`), `.notes`, `.graph_ascii`
+- `.backend` — one of "dag.test", "dag.test.strict", "dag.run", "unsupported"
+
+Plugins
+-------
+Subclass `AirflowDebugPlugin` and pass via `plugins=[...]`. Hooks include
+`before_run`, `before_task`, `after_task`, `on_task_error`, `after_run`.
+The runner ships three default plugins (`TaskContextPlugin`, `ProblemLogPlugin`,
+`ConsoleTracePlugin`); `_build_plugin_manager` skips defaults whose type is
+already provided by the caller.
+
+Fail-fast mode
+--------------
+`fail_fast=True` (default) disables retries and uses the strict local dag.test
+loop, so the first failed task aborts the run with a deterministic state.
+
+Graph rendering
+---------------
+- `format_dag_graph(dag)` / `print_dag_graph(dag)` — ASCII tree (capped at 500 tasks)
+- `render_dag_svg(dag)` / `write_dag_svg(dag)` — standalone SVG (capped at 200 tasks)
+
+Typical usage
+-------------
 
     from airflow_local_debug import debug_dag_cli
 
     if __name__ == "__main__":
         debug_dag_cli(dag, require_config_path=True)
+
+Library usage (no global state mutation)
+----------------------------------------
+
+    from airflow_local_debug import (
+        run_full_dag,
+        silenced_airflow_bootstrap_warnings,
+    )
+
+    with silenced_airflow_bootstrap_warnings():
+        result = run_full_dag(dag, config_path="/path/to/airflow_defaults.py")
+        if not result.ok:
+            ...
 """
 
 from airflow_local_debug.bootstrap import (

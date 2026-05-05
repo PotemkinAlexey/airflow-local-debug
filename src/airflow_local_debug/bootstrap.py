@@ -21,9 +21,12 @@ def silence_airflow_bootstrap_warnings() -> None:
     """
     Hide deprecation/future warnings during direct local DAG execution.
 
-    Mutates global `warnings` state for the lifetime of the process. Intended
-    for CLI use only (`if __name__ == "__main__":`). Library code should use
-    `silenced_airflow_bootstrap_warnings()` instead, which restores prior state.
+    .. deprecated:: 0.1.0
+        Mutates global `warnings` state for the lifetime of the process.
+        Library code should prefer `silenced_airflow_bootstrap_warnings()`,
+        which restores prior state on context exit. This function is kept
+        only because it is called from `ensure_quiet_airflow_bootstrap()`
+        after the CLI re-exec, where a permanent mutation is acceptable.
     """
 
     original_showwarning = warnings.showwarning

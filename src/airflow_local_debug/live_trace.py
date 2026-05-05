@@ -83,6 +83,11 @@ class LiveTaskTraceSession(AbstractContextManager):
         self._results.pop(key, None)
 
     def begin_task(self, task: Any, context: dict[str, Any]) -> None:
+        # Tasks may be added to the DAG after __enter__ (mapped clones,
+        # dynamically-extended TaskGroups). Wrap on first sight so plugin
+        # hooks run for them too.
+        if self.wrap_task_methods and id(task) not in self._originals:
+            self._wrap_task(task)
         self._ensure_before_task(task, context)
 
     def complete_task(self, task: Any, context: dict[str, Any], result: Any) -> None:

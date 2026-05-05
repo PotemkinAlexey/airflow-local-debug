@@ -180,10 +180,20 @@ def _format_tree_console_graph(
     return "\n".join(lines)
 
 
+ASCII_MAX_TASKS = 500
+
+
 def format_dag_graph(dag: Any, *, enable_colors: bool = True) -> str:
     tasks = list(getattr(dag, "task_dict", {}).values()) or list(getattr(dag, "tasks", []) or [])
     if not tasks:
         return f"✨ DAG Structure: {getattr(dag, 'dag_id', '<unknown>')}\n\n<empty>"
+
+    if len(tasks) > ASCII_MAX_TASKS:
+        return (
+            f"✨ DAG Structure: {getattr(dag, 'dag_id', '<unknown>')}\n\n"
+            f"<DAG has {len(tasks)} tasks; ASCII graph rendering disabled above {ASCII_MAX_TASKS}.>\n"
+            f"<Use the SVG renderer (write_dag_svg) for an overview of large DAGs.>"
+        )
 
     task_dict = {task.task_id: task for task in tasks}
 
