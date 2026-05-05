@@ -3,7 +3,11 @@
 Single-process local debug toolkit for ordinary Apache Airflow DAGs.
 
 Supported Airflow range: `apache-airflow>=2.10,!=3.0.*,<4`.
-Airflow 3 support targets 3.1+; 3.0.x is skipped because its local execution API is unstable.
+Validated on Airflow 2.10+, 3.1.3, 3.2.1. Airflow 3.0.x is intentionally
+skipped: smoke runs against 3.0.6 fail inside Airflow's own local execution
+API with HTTP 422 even for `EmptyOperator`, so `dag.test()`-style execution
+cannot complete. This is a 3.0 limitation upstream, not a bug in this
+package; the exclusion is enforced by the package metadata.
 
 ## What it does
 

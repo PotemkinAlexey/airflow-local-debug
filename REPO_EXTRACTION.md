@@ -51,7 +51,10 @@ Expected result:
 Before publishing or sharing internally, decide these points explicitly:
 
 - supported Airflow range
-  Current package metadata is `apache-airflow>=2.10,!=3.0.*,<4`
+  Current package metadata is `apache-airflow>=2.10,!=3.0.*,<4`.
+  Validated on 2.10+, 3.1.3, 3.2.1. Airflow 3.0.x is excluded because its
+  local execution API returns HTTP 422 even for `EmptyOperator` on 3.0.6
+  (upstream issue, not fixable in this package).
 - license
   Current placeholder is `LicenseRef-Proprietary`
 - versioning policy

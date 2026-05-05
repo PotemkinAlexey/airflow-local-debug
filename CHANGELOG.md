@@ -5,6 +5,13 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
+### Compatibility
+- Airflow range pinned to `>=2.10,!=3.0.*,<4`. Validated on Airflow 2.10+,
+  3.1.3, 3.2.1. Airflow 3.0.x is excluded because its local execution API
+  returns HTTP 422 even for `EmptyOperator` on 3.0.6, so `dag.test()`-style
+  runs cannot complete. This is an upstream limitation, not a bug in this
+  package; the exclusion stays until / unless Airflow 3.0 receives a fix.
+
 ### Added
 - `silenced_airflow_bootstrap_warnings()` context manager for library callers
   that need to suppress import-time Airflow warnings without leaking global state.
