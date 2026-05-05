@@ -13,7 +13,7 @@ authors = [
   { name = "Alexei Potiomkin" }
 ]
 dependencies = [
-  "apache-airflow>=2.10,<3",
+  "apache-airflow>=2.10,!=3.0.*,<4",
 ]
 
 [project.optional-dependencies]

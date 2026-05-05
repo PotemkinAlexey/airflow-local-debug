@@ -284,7 +284,8 @@ def _failed_task_label(dagrun: Any) -> str | None:
         return None
     if len(labels) == 1:
         return labels[0]
-    return ", ".join(sorted(labels[:3])) + (" ..." if len(labels) > 3 else "")
+    sorted_labels = sorted(labels)
+    return ", ".join(sorted_labels[:3]) + (" ..." if len(sorted_labels) > 3 else "")
 
 
 def _state_token(state: str | None) -> str | None:
@@ -424,7 +425,96 @@ def _normalize_result(result: RunResult) -> RunResult:
     return result
 
 
-def _strict_dag_test(
+def _add_logger_if_needed(ti: Any) -> None:
+    task_log = getattr(ti, "log", None)
+    handlers = getattr(task_log, "handlers", None)
+    add_handler = getattr(task_log, "addHandler", None)
+    if handlers is None or not callable(add_handler):
+        return
+
+    formatter = logging.Formatter("[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s")
+    handler = logging.StreamHandler(sys.stdout)
+    handler.level = logging.INFO
+    handler.setFormatter(formatter)
+    if not any(isinstance(existing, logging.StreamHandler) for existing in handlers):
+        add_handler(handler)
+
+
+def _set_local_task_exception(dagrun: Any, ti: Any, exc: BaseException) -> None:
+    try:
+        setattr(dagrun, "_airflow_debug_local_exception", exc)
+        setattr(dagrun, "_airflow_debug_local_task_label", _task_instance_label(ti))
+    except Exception:
+        pass
+
+
+def _refresh_task_instance(session: Any, ti: Any) -> Any:
+    try:
+        session.refresh(ti)
+        return ti
+    except Exception:
+        return ti
+
+
+def _is_failed_task_instance(ti: Any) -> bool:
+    return _state_token(getattr(ti, "state", None)) in _FAILED_TASK_STATES
+
+
+@contextmanager
+def _airflow3_serialization_fileloc(dag: Any):
+    fileloc = getattr(dag, "fileloc", None)
+    if fileloc and Path(str(fileloc)).exists():
+        yield
+        return
+
+    fallback = str(Path(__file__).resolve())
+    had_fileloc = hasattr(dag, "fileloc")
+    try:
+        setattr(dag, "fileloc", fallback)
+        yield
+    finally:
+        if had_fileloc:
+            try:
+                setattr(dag, "fileloc", fileloc)
+            except Exception:
+                pass
+        else:
+            try:
+                delattr(dag, "fileloc")
+            except Exception:
+                pass
+
+
+def _ensure_airflow3_serialized_dag(dag: Any, *, session: Any) -> Any:
+    from airflow.dag_processing.bundles.manager import DagBundlesManager
+    from airflow.models.serialized_dag import SerializedDagModel
+
+    try:
+        from airflow.serialization.definitions.dag import SerializedDAG
+        from airflow.serialization.serialized_objects import DagSerialization, LazyDeserializedDAG
+    except ImportError:
+        from airflow.serialization.serialized_objects import LazyDeserializedDAG, SerializedDAG
+
+        DagSerialization = SerializedDAG
+
+    bundle_name = "dags-folder"
+    DagBundlesManager().sync_bundles_to_db(session=session)
+    session.commit()
+
+    with _airflow3_serialization_fileloc(dag):
+        SerializedDAG.bulk_write_to_db(bundle_name, None, [dag], parse_duration=None, session=session)
+        SerializedDagModel.write_dag(
+            LazyDeserializedDAG.from_dag(dag),
+            bundle_name=bundle_name,
+            bundle_version=None,
+            min_update_interval=None,
+            session=session,
+        )
+        session.commit()
+        return DagSerialization.deserialize_dag(DagSerialization.serialize_dag(dag))
+
+
+def _strict_dag_test_airflow2(
     dag: Any,
     *,
     execution_date: datetime | None,
@@ -436,14 +526,6 @@ def _strict_dag_test(
     from airflow.utils import timezone
     from airflow.utils.session import create_session
     from airflow.utils.state import DagRunState, State, TaskInstanceState
-
-    def add_logger_if_needed(ti: Any) -> None:
-        formatter = logging.Formatter("[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s")
-        handler = logging.StreamHandler(sys.stdout)
-        handler.level = logging.INFO
-        handler.setFormatter(formatter)
-        if not any(isinstance(existing, logging.StreamHandler) for existing in ti.log.handlers):
-            ti.log.addHandler(handler)
 
     execution_date = execution_date or timezone.utcnow()
     dag.validate()
@@ -519,7 +601,7 @@ def _strict_dag_test(
             triggerer_running = _triggerer_is_healthy()
             for ti in scheduled_tis:
                 ti.task = tasks[ti.task_id]
-                add_logger_if_needed(ti)
+                _add_logger_if_needed(ti)
                 trace_context = _trace_context_for_ti(ti)
                 if trace_session is not None:
                     trace_session.begin_task(ti.task, trace_context)
@@ -539,25 +621,348 @@ def _strict_dag_test(
                 except Exception as exc:
                     if trace_session is not None:
                         trace_session.fail_task(ti.task, trace_context, exc)
-                    task_label = _task_instance_label(ti)
-                    try:
-                        setattr(dr, "_airflow_debug_local_exception", exc)
-                        setattr(dr, "_airflow_debug_local_task_label", task_label)
-                    except Exception:
-                        pass
+                    _set_local_task_exception(dr, ti, exc)
                     dag.log.exception("Task failed; ti=%s", ti)
                     session.expire_all()
                     dr = session.merge(dr)
                     dr.dag = dag
-                    try:
-                        setattr(dr, "_airflow_debug_local_exception", exc)
-                        setattr(dr, "_airflow_debug_local_task_label", task_label)
-                    except Exception:
-                        pass
+                    _set_local_task_exception(dr, ti, exc)
                     dr.update_state(session=session)
                     session.commit()
                     return dr
         return dr
+
+
+def _strict_dag_test_airflow3_legacy(
+    dag: Any,
+    *,
+    execution_date: datetime | None,
+    run_conf: dict[str, Any] | None,
+    trace_session: Any | None = None,
+) -> Any:
+    from airflow.models.dag import DAG as SchedulerDAG
+    from airflow.models.dag import _get_or_create_dagrun
+    from airflow.models.dagrun import DagRun
+    from airflow.sdk.definitions.dag import _run_task
+    from airflow.serialization.serialized_objects import SerializedDAG
+    from airflow.utils import timezone
+    from airflow.utils.session import create_session
+    from airflow.utils.state import DagRunState, State, TaskInstanceState
+    from airflow.utils.types import DagRunTriggeredByType, DagRunType
+
+    execution_date = execution_date or timezone.utcnow()
+    dag.validate()
+    task_order = _topological_task_order(dag)
+
+    with create_session() as session:
+        SchedulerDAG.clear_dags(
+            dags=[dag],
+            start_date=execution_date,
+            end_date=execution_date,
+            dag_run_state=False,  # type: ignore[arg-type]
+        )
+        logical_date = timezone.coerce_datetime(execution_date)
+        run_after = logical_date or timezone.coerce_datetime(timezone.utcnow())
+        data_interval = dag.timetable.infer_manual_data_interval(run_after=logical_date) if logical_date else None
+        scheduler_dag = SerializedDAG.deserialize_dag(SerializedDAG.serialize_dag(dag))  # type: ignore[arg-type]
+        dr = _get_or_create_dagrun(
+            dag=scheduler_dag,
+            start_date=logical_date or run_after,
+            logical_date=logical_date,
+            data_interval=data_interval,
+            run_after=run_after,
+            run_id=DagRun.generate_run_id(
+                run_type=DagRunType.MANUAL,
+                logical_date=logical_date,
+                run_after=run_after,
+            ),
+            session=session,
+            conf=run_conf,
+            triggered_by=DagRunTriggeredByType.TEST,
+        )
+        try:
+            dr.start_dr_spans_if_needed(tis=[])
+        except Exception:
+            pass
+        dr.dag = dag
+
+        tasks = dag.task_dict
+        max_iterations = max(50, len(tasks) * 10)
+        iteration = 0
+        while dr.state == DagRunState.RUNNING:
+            iteration += 1
+            if iteration > max_iterations:
+                dag.log.warning(
+                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
+                    max_iterations,
+                )
+                break
+            session.expire_all()
+            dr.dag = dag
+            schedulable_tis, _ = dr.update_state(session=session)
+            for schedulable in schedulable_tis:
+                if schedulable.state != TaskInstanceState.UP_FOR_RESCHEDULE:
+                    schedulable.try_number += 1
+                schedulable.state = TaskInstanceState.SCHEDULED
+                schedulable.scheduled_dttm = timezone.utcnow()
+            session.commit()
+
+            all_tis = list(dr.get_task_instances(session=session))
+            scheduled_tis = [ti for ti in all_tis if ti.state == TaskInstanceState.SCHEDULED]
+            scheduled_tis.sort(
+                key=lambda ti: (
+                    task_order.get(ti.task_id, 10**9),
+                    getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
+                    ti.task_id,
+                )
+            )
+
+            if not scheduled_tis:
+                failed_or_terminal = any(_state_token(getattr(ti, "state", None)) in {"failed", "upstream_failed"} for ti in all_tis)
+                if failed_or_terminal:
+                    session.expire_all()
+                    dr = session.merge(dr)
+                    dr.dag = dag
+                    dr.update_state(session=session)
+                    session.commit()
+                    break
+                ids_unrunnable = [ti for ti in all_tis if ti.state not in State.finished]
+                if ids_unrunnable:
+                    dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
+                break
+
+            for ti in scheduled_tis:
+                ti.task = tasks[ti.task_id]
+                _add_logger_if_needed(ti)
+                trace_context = _trace_context_for_ti(ti)
+                if trace_session is not None:
+                    trace_session.begin_task(ti.task, trace_context)
+                try:
+                    _run_task(ti=ti, run_triggerer=True)
+                    ti = _refresh_task_instance(session, ti)
+                    if _is_failed_task_instance(ti):
+                        if trace_session is not None:
+                            trace_session.fail_task(
+                                ti.task,
+                                trace_context,
+                                RuntimeError(f"Task {_task_instance_label(ti) or ti.task_id} failed."),
+                            )
+                        session.expire_all()
+                        dr = session.merge(dr)
+                        dr.dag = dag
+                        dr.update_state(session=session)
+                        session.commit()
+                        return dr
+                    if trace_session is not None:
+                        trace_session.complete_task(ti.task, trace_context, _best_effort_task_result(ti))
+                except Exception as exc:
+                    if trace_session is not None:
+                        trace_session.fail_task(ti.task, trace_context, exc)
+                    _set_local_task_exception(dr, ti, exc)
+                    dag.log.exception("Task failed; ti=%s", ti)
+                    session.expire_all()
+                    dr = session.merge(dr)
+                    dr.dag = dag
+                    _set_local_task_exception(dr, ti, exc)
+                    dr.update_state(session=session)
+                    session.commit()
+                    return dr
+        return dr
+
+
+def _strict_dag_test_airflow3_serialized(
+    dag: Any,
+    *,
+    execution_date: datetime | None,
+    run_conf: dict[str, Any] | None,
+    trace_session: Any | None = None,
+) -> Any:
+    from airflow.models.dagrun import DagRun, get_or_create_dagrun
+    from airflow.sdk import DagRunState, TaskInstanceState, timezone
+    from airflow.sdk.definitions.dag import _run_task
+    from airflow.utils.session import create_session
+    from airflow.utils.state import State
+    from airflow.utils.types import DagRunTriggeredByType, DagRunType
+
+    try:
+        from airflow.serialization.definitions.dag import SerializedDAG
+    except ImportError:
+        from airflow.serialization.serialized_objects import SerializedDAG
+
+    try:
+        from airflow.serialization.encoders import coerce_to_core_timetable
+    except ImportError:
+        coerce_to_core_timetable = None  # type: ignore[assignment]
+
+    execution_date = execution_date or timezone.utcnow()
+    dag.validate()
+    task_order = _topological_task_order(dag)
+
+    with create_session() as session:
+        scheduler_dag = _ensure_airflow3_serialized_dag(dag, session=session)
+        SerializedDAG.clear_dags(
+            dags=[scheduler_dag],
+            start_date=execution_date,
+            end_date=execution_date,
+            dag_run_state=False,  # type: ignore[arg-type]
+        )
+        logical_date = timezone.coerce_datetime(execution_date)
+        run_after = timezone.coerce_datetime(timezone.utcnow())
+        if logical_date is None:
+            data_interval = None
+        else:
+            timetable = coerce_to_core_timetable(dag.timetable) if coerce_to_core_timetable else dag.timetable
+            data_interval = timetable.infer_manual_data_interval(run_after=logical_date)
+
+        scheduler_dag.on_success_callback = dag.on_success_callback  # type: ignore[attr-defined, union-attr]
+        scheduler_dag.on_failure_callback = dag.on_failure_callback  # type: ignore[attr-defined, union-attr]
+        dr = get_or_create_dagrun(
+            dag=scheduler_dag,
+            start_date=logical_date or run_after,
+            logical_date=logical_date,
+            data_interval=data_interval,
+            run_after=run_after,
+            run_id=DagRun.generate_run_id(
+                run_type=DagRunType.MANUAL,
+                logical_date=logical_date,
+                run_after=run_after,
+            ),
+            session=session,
+            conf=run_conf,
+            triggered_by=DagRunTriggeredByType.TEST,
+            triggering_user_name="airflow-local-debug",
+        )
+        dr.dag = scheduler_dag
+
+        tasks = dag.task_dict
+        max_iterations = max(50, len(tasks) * 10)
+        iteration = 0
+        while dr.state == DagRunState.RUNNING:
+            iteration += 1
+            if iteration > max_iterations:
+                dag.log.warning(
+                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
+                    max_iterations,
+                )
+                break
+            session.expire_all()
+            dr.dag = scheduler_dag
+            schedulable_tis, _ = dr.update_state(session=session)
+            for schedulable in schedulable_tis:
+                if schedulable.state != TaskInstanceState.UP_FOR_RESCHEDULE:
+                    schedulable.try_number += 1
+                schedulable.state = TaskInstanceState.SCHEDULED
+                schedulable.scheduled_dttm = timezone.utcnow()
+            session.commit()
+
+            all_tis = list(dr.get_task_instances(session=session))
+            scheduled_tis = [ti for ti in all_tis if ti.state == TaskInstanceState.SCHEDULED]
+            scheduled_tis.sort(
+                key=lambda ti: (
+                    task_order.get(ti.task_id, 10**9),
+                    getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
+                    ti.task_id,
+                )
+            )
+
+            if not scheduled_tis:
+                failed_or_terminal = any(_state_token(getattr(ti, "state", None)) in {"failed", "upstream_failed"} for ti in all_tis)
+                if failed_or_terminal:
+                    session.expire_all()
+                    dr = session.merge(dr)
+                    dr.dag = scheduler_dag
+                    dr.update_state(session=session)
+                    session.commit()
+                    break
+                ids_unrunnable = [ti for ti in all_tis if ti.state not in State.finished]
+                if ids_unrunnable:
+                    dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
+                break
+
+            for ti in scheduled_tis:
+                task = tasks[ti.task_id]
+                _add_logger_if_needed(ti)
+                trace_context = _trace_context_for_ti(ti)
+                if trace_session is not None:
+                    trace_session.begin_task(task, trace_context)
+                try:
+                    _run_task(ti=ti, task=task, run_triggerer=True)
+                    ti = _refresh_task_instance(session, ti)
+                    if _is_failed_task_instance(ti):
+                        if trace_session is not None:
+                            trace_session.fail_task(
+                                task,
+                                trace_context,
+                                RuntimeError(f"Task {_task_instance_label(ti) or ti.task_id} failed."),
+                            )
+                        session.expire_all()
+                        dr = session.merge(dr)
+                        dr.dag = scheduler_dag
+                        dr.update_state(session=session)
+                        session.commit()
+                        return dr
+                    if trace_session is not None:
+                        trace_session.complete_task(task, trace_context, _best_effort_task_result(ti))
+                except Exception as exc:
+                    if trace_session is not None:
+                        trace_session.fail_task(task, trace_context, exc)
+                    _set_local_task_exception(dr, ti, exc)
+                    dag.log.exception("Task failed; ti=%s", ti)
+                    session.expire_all()
+                    dr = session.merge(dr)
+                    dr.dag = scheduler_dag
+                    _set_local_task_exception(dr, ti, exc)
+                    dr.update_state(session=session)
+                    session.commit()
+                    return dr
+        return dr
+
+
+def _strict_dag_test(
+    dag: Any,
+    *,
+    execution_date: datetime | None,
+    run_conf: dict[str, Any] | None,
+    trace_session: Any | None = None,
+) -> Any:
+    has_airflow2_private_runner = False
+    try:
+        from airflow.models.dag import _run_task as _airflow2_run_task  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        has_airflow2_private_runner = True
+
+    if has_airflow2_private_runner:
+        return _strict_dag_test_airflow2(
+            dag,
+            execution_date=execution_date,
+            run_conf=run_conf,
+            trace_session=trace_session,
+        )
+
+    has_airflow3_serialized_runner = False
+    try:
+        from airflow.models.dagrun import get_or_create_dagrun as _airflow3_get_or_create  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        has_airflow3_serialized_runner = True
+
+    if has_airflow3_serialized_runner:
+        return _strict_dag_test_airflow3_serialized(
+            dag,
+            execution_date=execution_date,
+            run_conf=run_conf,
+            trace_session=trace_session,
+        )
+
+    return _strict_dag_test_airflow3_legacy(
+        dag,
+        execution_date=execution_date,
+        run_conf=run_conf,
+        trace_session=trace_session,
+    )
 
 
 def _build_graph_ascii(dag: Any, notes: list[str]) -> str | None:

@@ -150,16 +150,16 @@ def test_failed_task_label_returns_none_when_nothing_failed() -> None:
 def test_failed_task_label_collects_multiple_with_truncation() -> None:
     dagrun = FakeDagrun(
         [
-            FakeTI(task_id="a", state="failed"),
+            FakeTI(task_id="d", state="failed"),
             FakeTI(task_id="b", state="failed"),
             FakeTI(task_id="c", state="up_for_retry"),
-            FakeTI(task_id="d", state="failed"),
+            FakeTI(task_id="a", state="failed"),
         ]
     )
     label = runner._failed_task_label(dagrun)
     assert label is not None
-    # First three are joined alphabetically; the rest is summarized.
-    assert label.startswith("a, b, c") and "..." in label
+    # Labels are sorted before truncation so DB task instance order does not leak into the report.
+    assert label == "a, b, c ..."
 
 
 # --- _normalize_task_states_for_backend -----------------------------------

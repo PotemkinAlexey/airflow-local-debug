@@ -2,7 +2,8 @@
 
 Single-process local debug toolkit for ordinary Apache Airflow DAGs.
 
-Supported Airflow range: `apache-airflow>=2.10,<3`.
+Supported Airflow range: `apache-airflow>=2.10,!=3.0.*,<4`.
+Airflow 3 support targets 3.1+; 3.0.x is skipped because its local execution API is unstable.
 
 ## What it does
 

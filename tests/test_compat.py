@@ -18,7 +18,7 @@ class _AirflowTwoDag:
 
 
 class _AirflowThreeDag:
-    def test(self, logical_date=None, conf=None):  # noqa: D401
+    def test(self, logical_date=None, run_conf=None):  # noqa: D401
         return None
 
 
@@ -40,7 +40,7 @@ def test_has_dag_test_detects_callable() -> None:
 
 def test_build_dag_test_kwargs_prefers_logical_date_for_airflow_three() -> None:
     kwargs = build_dag_test_kwargs(_AirflowThreeDag(), MOMENT, {"foo": 1})
-    assert kwargs == {"logical_date": MOMENT, "conf": {"foo": 1}}
+    assert kwargs == {"logical_date": MOMENT, "run_conf": {"foo": 1}}
 
 
 def test_build_dag_test_kwargs_uses_run_conf_when_supported() -> None:
