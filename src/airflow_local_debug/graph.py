@@ -7,6 +7,8 @@ from pathlib import Path
 import textwrap
 from typing import Any
 
+from airflow_local_debug.topology import topological_task_ids as _topological_task_ids
+
 RESET = "\033[0m"
 CYAN = "\033[36m"
 MAGENTA = "\033[35m"
@@ -30,34 +32,6 @@ def _task_group_path(task: Any) -> str | None:
     if group_id in {"root", None}:
         return None
     return str(group_id)
-
-
-def _topological_task_ids(tasks: list[Any]) -> list[str]:
-    task_dict = {task.task_id: task for task in tasks}
-    remaining_upstream: dict[str, int] = {}
-    downstream_map: dict[str, list[str]] = defaultdict(list)
-
-    for task in tasks:
-        upstream_ids = set(getattr(task, "upstream_task_ids", set()) or set()) & set(task_dict)
-        remaining_upstream[task.task_id] = len(upstream_ids)
-        for child_id in sorted(getattr(task, "downstream_task_ids", set()) or set()):
-            if child_id in task_dict:
-                downstream_map[task.task_id].append(child_id)
-
-    ready = sorted(task_id for task_id, count in remaining_upstream.items() if count == 0)
-    ordered: list[str] = []
-
-    while ready:
-        task_id = ready.pop(0)
-        ordered.append(task_id)
-        for child_id in downstream_map.get(task_id, []):
-            remaining_upstream[child_id] -= 1
-            if remaining_upstream[child_id] == 0:
-                ready.append(child_id)
-        ready.sort()
-
-    leftovers = sorted(task_id for task_id in task_dict if task_id not in ordered)
-    return ordered + leftovers
 
 
 def _task_depths(tasks: list[Any]) -> dict[str, int]:
@@ -225,6 +199,9 @@ def print_dag_graph(dag: Any, *, enable_colors: bool = True) -> None:
     print(format_dag_graph(dag, enable_colors=enable_colors))
 
 
+SVG_MAX_TASKS = 200
+
+
 def render_dag_svg(dag: Any) -> str:
     tasks = list(getattr(dag, "task_dict", {}).values()) or list(getattr(dag, "tasks", []) or [])
     if not tasks:
@@ -234,6 +211,21 @@ def render_dag_svg(dag: Any) -> str:
             '<rect width="100%" height="100%" fill="#f8fafc"/>'
             f'<text x="24" y="40" font-size="20" font-family="Helvetica, Arial, sans-serif" fill="#0f172a">{dag_id}</text>'
             '<text x="24" y="76" font-size="14" font-family="Helvetica, Arial, sans-serif" fill="#475569">&lt;empty dag&gt;</text>'
+            "</svg>"
+        )
+
+    if len(tasks) > SVG_MAX_TASKS:
+        dag_id = escape(str(getattr(dag, "dag_id", "<unknown>")))
+        return (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="160">'
+            '<rect width="100%" height="100%" fill="#f8fafc"/>'
+            f'<text x="24" y="44" font-size="20" font-weight="700" font-family="Helvetica, Arial, sans-serif" fill="#0f172a">{dag_id}</text>'
+            f'<text x="24" y="84" font-size="14" font-family="Helvetica, Arial, sans-serif" fill="#475569">'
+            f'DAG has {len(tasks)} tasks; SVG rendering disabled above {SVG_MAX_TASKS}.'
+            '</text>'
+            '<text x="24" y="116" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#64748b">'
+            'Use the ASCII graph (print_dag_graph) for an overview of large DAGs.'
+            '</text>'
             "</svg>"
         )
 

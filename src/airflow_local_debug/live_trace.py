@@ -100,6 +100,8 @@ class LiveTaskTraceSession(AbstractContextManager):
         self._finish_task(key)
 
     def _wrap_task(self, task: Any) -> None:
+        if id(task) in self._originals:
+            return
         original_pre = task.__dict__.get("pre_execute", _MISSING)
         original_execute = task.__dict__.get("execute", _MISSING)
         original_post = task.__dict__.get("post_execute", _MISSING)

@@ -12,5 +12,5 @@ build:
 	$(PYTHON) -m build
 
 clean:
-	rm -rf build dist src/*.egg-info .pytest_cache .mypy_cache
+	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .mypy_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

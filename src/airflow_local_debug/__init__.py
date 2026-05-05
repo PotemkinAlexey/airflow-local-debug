@@ -16,16 +16,23 @@ Typical usage:
         debug_dag_cli(dag, require_config_path=True)
 """
 
+from airflow_local_debug.bootstrap import (
+    ensure_quiet_airflow_bootstrap,
+    silence_airflow_bootstrap_warnings,
+    silenced_airflow_bootstrap_warnings,
+)
 from airflow_local_debug.compat import get_airflow_version
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
 from airflow_local_debug.live_trace import live_task_trace
+from airflow_local_debug.models import LocalConfig, RunResult, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
     DebugPluginManager,
     ProblemLogPlugin,
+    RepeatedProblemWarningError,
     TaskContextPlugin,
 )
 from airflow_local_debug.report import format_run_report, print_run_report
@@ -48,8 +55,7 @@ __all__ = [
     "debug_dag_file_cli",
     "debug_dag_from_file",
     "DebugPluginManager",
-    "ProblemLogPlugin",
-    "TaskContextPlugin",
+    "ensure_quiet_airflow_bootstrap",
     "format_dag_graph",
     "format_pretty_exception",
     "format_run_report",
@@ -57,14 +63,22 @@ __all__ = [
     "get_default_config_path",
     "live_task_trace",
     "load_local_config",
+    "LocalConfig",
     "print_dag_graph",
     "print_run_report",
+    "ProblemLogPlugin",
     "render_dag_svg",
+    "RepeatedProblemWarningError",
     "run_full_dag",
     "run_full_dag_from_file",
+    "RunResult",
     "safe_repr",
     "shrink",
+    "silence_airflow_bootstrap_warnings",
+    "silenced_airflow_bootstrap_warnings",
     "StepTracer",
     "StepTracerOptions",
+    "TaskContextPlugin",
+    "TaskRunInfo",
     "write_dag_svg",
 ]

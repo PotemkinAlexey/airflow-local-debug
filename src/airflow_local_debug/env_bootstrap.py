@@ -18,20 +18,35 @@ def _env_key(prefix: str, raw_key: str) -> str:
     return f"{prefix}{normalized}"
 
 
-def _serialize_variable(value: Any) -> str:
+def _serialize_variable(value: Any, *, key: str) -> str:
     if isinstance(value, str):
         return value
-    return json.dumps(value)
+    try:
+        return json.dumps(value)
+    except TypeError as exc:
+        raise TypeError(
+            f"Variable {key!r} is not JSON-serializable ({type(value).__name__}). "
+            "Convert it to a primitive type or pre-serialize it as a string."
+        ) from exc
 
 
-def _serialize_connection(value: Any) -> str:
+def _serialize_connection(value: Any, *, conn_id: str) -> str:
     if isinstance(value, str):
         return value
     if not isinstance(value, dict):
-        raise TypeError(f"Unsupported connection payload type: {type(value).__name__}")
+        raise TypeError(
+            f"Connection {conn_id!r} has unsupported payload type {type(value).__name__}; "
+            "expected dict or URI string."
+        )
 
     payload = {key: item for key, item in value.items() if item not in (None, "", [], {})}
-    return json.dumps(payload)
+    try:
+        return json.dumps(payload)
+    except TypeError as exc:
+        raise TypeError(
+            f"Connection {conn_id!r} contains a non-JSON-serializable field. "
+            f"Offending payload keys: {sorted(payload)!r}."
+        ) from exc
 
 
 @contextmanager
@@ -61,10 +76,10 @@ def bootstrap_airflow_env(
     updates: dict[str, str] = {}
 
     for conn_id, payload in local_config.connections.items():
-        updates[_env_key("AIRFLOW_CONN_", conn_id)] = _serialize_connection(payload)
+        updates[_env_key("AIRFLOW_CONN_", conn_id)] = _serialize_connection(payload, conn_id=conn_id)
 
     for key, value in local_config.variables.items():
-        updates[_env_key("AIRFLOW_VAR_", key)] = _serialize_variable(value)
+        updates[_env_key("AIRFLOW_VAR_", key)] = _serialize_variable(value, key=key)
 
     # Avoid example DAG noise in local runs.
     updates.setdefault("AIRFLOW__CORE__LOAD_EXAMPLES", "False")

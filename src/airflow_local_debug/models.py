@@ -41,4 +41,9 @@ class RunResult:
 
     @property
     def ok(self) -> bool:
-        return self.exception is None and self.state not in {"failed", "error"}
+        if self.exception is not None:
+            return False
+        state = (self.state or "").strip().lower()
+        if state.startswith("dagrunstate."):
+            state = state[len("dagrunstate.") :]
+        return state == "success"

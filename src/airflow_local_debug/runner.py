@@ -46,6 +46,7 @@ from airflow_local_debug.plugins import (
     ProblemLogPlugin,
     TaskContextPlugin,
 )
+from airflow_local_debug.topology import topological_task_order as _topological_task_order
 from airflow_local_debug.traceback_utils import format_pretty_exception
 
 _FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
@@ -377,8 +378,9 @@ def _summarize_task_states(task_runs: list[TaskRunInfo], *, limit: int = 5) -> s
 
 def _normalize_result(result: RunResult) -> RunResult:
     failed_tasks, unfinished_tasks = _task_state_buckets(result.tasks)
+    state_token = _state_token(result.state)
     if failed_tasks:
-        if result.state not in {"failed", "error"}:
+        if state_token not in {"failed", "error"}:
             result.state = "failed"
         result.notes.append(
             "Local run detected failed or retry-pending tasks: "
@@ -395,7 +397,7 @@ def _normalize_result(result: RunResult) -> RunResult:
             result.exception_raw = result.exception_raw or message
         return result
 
-    if unfinished_tasks and _state_token(result.state) not in {"success", "failed", "error"}:
+    if unfinished_tasks and state_token not in {"success", "failed", "error"}:
         result.state = "incomplete"
         result.notes.append(
             "Local run stopped with unfinished tasks: "
@@ -409,38 +411,6 @@ def _normalize_result(result: RunResult) -> RunResult:
             result.exception = message
             result.exception_raw = result.exception_raw or message
     return result
-
-
-def _topological_task_order(dag: Any) -> dict[str, int]:
-    task_dict = dict(getattr(dag, "task_dict", {}) or {})
-    if not task_dict:
-        return {}
-
-    remaining_upstream: dict[str, int] = {}
-    downstream_map: dict[str, list[str]] = {}
-    task_ids = set(task_dict)
-    for task_id, task in task_dict.items():
-        upstream_ids = set(getattr(task, "upstream_task_ids", set()) or set()) & task_ids
-        remaining_upstream[task_id] = len(upstream_ids)
-        downstream_map[task_id] = sorted(
-            child_id for child_id in (getattr(task, "downstream_task_ids", set()) or set()) if child_id in task_ids
-        )
-
-    ready = sorted(task_id for task_id, count in remaining_upstream.items() if count == 0)
-    ordered: list[str] = []
-    while ready:
-        task_id = ready.pop(0)
-        ordered.append(task_id)
-        for child_id in downstream_map.get(task_id, []):
-            remaining_upstream[child_id] -= 1
-            if remaining_upstream[child_id] == 0:
-                ready.append(child_id)
-        ready.sort()
-
-    for task_id in sorted(task_ids):
-        if task_id not in ordered:
-            ordered.append(task_id)
-    return {task_id: index for index, task_id in enumerate(ordered)}
 
 
 def _strict_dag_test(
@@ -668,11 +638,17 @@ def _build_plugin_manager(
     plugins: Iterable[AirflowDebugPlugin] | None,
     notes: list[str],
 ) -> DebugPluginManager:
-    active_plugins: list[AirflowDebugPlugin] = [TaskContextPlugin(), ProblemLogPlugin()]
-    if trace:
+    user_plugins = list(plugins or [])
+    user_types = {type(plugin) for plugin in user_plugins}
+
+    active_plugins: list[AirflowDebugPlugin] = []
+    if TaskContextPlugin not in user_types:
+        active_plugins.append(TaskContextPlugin())
+    if ProblemLogPlugin not in user_types:
+        active_plugins.append(ProblemLogPlugin())
+    if trace and ConsoleTracePlugin not in user_types:
         active_plugins.append(ConsoleTracePlugin())
-    if plugins:
-        active_plugins.extend(list(plugins))
+    active_plugins.extend(user_plugins)
     return DebugPluginManager(active_plugins, notes=notes)
 
 
@@ -821,19 +797,24 @@ def _execute_full_dag(
             error_raw=error_raw,
         )
     except BaseException as exc:
-        error_raw = traceback.format_exc()
-        dagrun = dagrun or _best_effort_last_dagrun(dag)
-        result = _error_result(
-            dag=dag,
-            dagrun=dagrun,
-            config_path=config_path,
-            notes=notes,
-            graph_ascii=graph_ascii,
-            backend=backend,
-            exc=exc,
-            error_raw=error_raw,
-        )
-        pending_base_exception = exc
+        # SystemExit(0) is a clean shutdown, not a DAG failure — re-raise without
+        # constructing an error result so the user-visible state stays neutral.
+        if isinstance(exc, SystemExit) and (exc.code in (None, 0)):
+            pending_base_exception = exc
+        else:
+            error_raw = traceback.format_exc()
+            dagrun = dagrun or _best_effort_last_dagrun(dag)
+            result = _error_result(
+                dag=dag,
+                dagrun=dagrun,
+                config_path=config_path,
+                notes=notes,
+                graph_ascii=graph_ascii,
+                backend=backend,
+                exc=exc,
+                error_raw=error_raw,
+            )
+            pending_base_exception = exc
     finally:
         if result is None:
             result = RunResult(

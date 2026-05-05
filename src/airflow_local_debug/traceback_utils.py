@@ -216,6 +216,17 @@ def _classify_problem(
     message: str = "",
     status: Any = None,
 ) -> tuple[str, str, str]:
+    """
+    Classify an error into a single problem category.
+
+    Priority order (first match wins, top to bottom):
+        timeout > rate-limit-http > network > auth > json > io > perm
+        > generic 4xx/5xx http > airflow > key > value > unknown
+
+    The order favors transport-level diagnostics (timeout/network) over
+    application-level ones (auth/json) so that, for example, a "timeout
+    while authenticating" is reported as a timeout problem rather than auth.
+    """
     module_name = str(module_name or "").lower()
     class_name = str(class_name or "").lower()
     message = str(message or "").lower()

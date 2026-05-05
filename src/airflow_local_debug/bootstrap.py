@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import sys
 import warnings
+from contextlib import contextmanager
+from typing import Iterator
 
 _QUIET_READY_ENV = "AIRFLOW_DEBUG_BOOTSTRAP_QUIET_READY"
 
@@ -19,11 +21,9 @@ def silence_airflow_bootstrap_warnings() -> None:
     """
     Hide deprecation/future warnings during direct local DAG execution.
 
-    Intended for:
-
-        if __name__ == "__main__":
-            from airflow_local_debug.bootstrap import silence_airflow_bootstrap_warnings
-            silence_airflow_bootstrap_warnings()
+    Mutates global `warnings` state for the lifetime of the process. Intended
+    for CLI use only (`if __name__ == "__main__":`). Library code should use
+    `silenced_airflow_bootstrap_warnings()` instead, which restores prior state.
     """
 
     original_showwarning = warnings.showwarning
@@ -36,6 +36,32 @@ def silence_airflow_bootstrap_warnings() -> None:
     warnings.showwarning = quiet_showwarning
     warnings.simplefilter("ignore", DeprecationWarning)
     warnings.simplefilter("ignore", FutureWarning)
+
+
+@contextmanager
+def silenced_airflow_bootstrap_warnings() -> Iterator[None]:
+    """
+    Context-manager version of `silence_airflow_bootstrap_warnings`.
+
+    Restores the previous `warnings.showwarning` and filter state on exit,
+    so it is safe to call from library code without leaking global mutations.
+    """
+
+    original_showwarning = warnings.showwarning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.simplefilter("ignore", FutureWarning)
+
+        def quiet_showwarning(message, category, filename, lineno, file=None, line=None):
+            if issubclass(category, (DeprecationWarning, FutureWarning)):
+                return
+            return original_showwarning(message, category, filename, lineno, file=file, line=line)
+
+        warnings.showwarning = quiet_showwarning
+        try:
+            yield
+        finally:
+            warnings.showwarning = original_showwarning
 
 
 def ensure_quiet_airflow_bootstrap() -> None:
