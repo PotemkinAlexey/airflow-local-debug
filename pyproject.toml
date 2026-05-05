@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Deterministic single-process local debug toolkit for Apache Airflow DAGs"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = "LicenseRef-Proprietary"
 authors = [
   { name = "Alexei Potiomkin" }
 ]

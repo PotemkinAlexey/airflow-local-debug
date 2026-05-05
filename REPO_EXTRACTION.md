@@ -53,7 +53,7 @@ Before publishing or sharing internally, decide these points explicitly:
 - supported Airflow range
   Current package metadata is `apache-airflow>=2.10,<4`
 - license
-  Current placeholder is `Proprietary`
+  Current placeholder is `LicenseRef-Proprietary`
 - versioning policy
   Recommended: SemVer starting at `0.1.0`
 - publishing model
