@@ -252,15 +252,12 @@ def _classify_problem(
         "failed to retrieve a token",
         "invalid_client",
         "invalid grant",
-        "credential",
         "credentials",
         "oauth",
-        "token",
+        "access token",
+        "bearer token",
         "aadsts",
-        "login",
-        "tenant",
         "managed identity",
-        "identity",
     ):
         return ("auth",) + ERROR_STYLES["auth"]
     if _has_any(message, "jsondecode", "json decode", "invalid json", "malformed json", "expecting value"):

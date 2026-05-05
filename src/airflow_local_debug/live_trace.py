@@ -236,5 +236,7 @@ def live_task_trace(
     plugin_manager: DebugPluginManager | None = None,
     wrap_task_methods: bool = True,
 ) -> LiveTaskTraceSession:
+    if plugin_manager is not None and plugins is not None:
+        raise ValueError("Pass either plugin_manager or plugins, not both.")
     manager = plugin_manager or DebugPluginManager(plugins if plugins is not None else [ConsoleTracePlugin()])
     return LiveTaskTraceSession(dag, manager, wrap_task_methods=wrap_task_methods)

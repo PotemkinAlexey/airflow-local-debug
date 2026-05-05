@@ -175,7 +175,8 @@ def load_local_config(filepath: str | None = None) -> LocalConfig:
     - POOLS
     """
     resolved_path = filepath or get_default_config_path(required=True)
-    assert resolved_path is not None
+    if resolved_path is None:
+        raise ValueError("No config file path available.")
     module = _load_module_from_path(resolved_path)
 
     config = LocalConfig(source_path=resolved_path)

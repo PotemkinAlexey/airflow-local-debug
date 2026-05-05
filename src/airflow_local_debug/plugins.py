@@ -227,7 +227,11 @@ class _ProblemLogPrettyHandler(logging.Handler):
 
 
 class RepeatedProblemWarningError(RuntimeError):
-    """Raised when the same warning repeats inside one task during local debug."""
+    """Raised when the same warning repeats inside one task during local debug.
+
+    Intentionally raised from logging.Handler.emit() to abort a task that is
+    stuck in a warning loop. Propagates up through the task execution stack.
+    """
 
 
 class DebugPluginManager:

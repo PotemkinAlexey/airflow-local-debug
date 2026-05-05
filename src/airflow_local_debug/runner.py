@@ -1118,13 +1118,15 @@ def run_full_dag_from_file(
         with bootstrap_airflow_env(config_path=selected_config_path, extra_env=extra_env) as local_config:
             module = _load_module_from_file(dag_file)
             dag = _resolve_dag_from_module(module, dag_id=dag_id)
+            # extra_env is already applied by the outer bootstrap above (needed for DAG import).
+            # Pass extra_env=None to _execute_full_dag to avoid a second redundant apply.
             return _execute_full_dag(
                 dag,
                 local_config=local_config,
                 config_path=selected_config_path,
                 logical_date=logical_date,
                 conf=conf,
-                extra_env=extra_env,
+                extra_env=None,
                 trace=trace,
                 fail_fast=fail_fast,
                 plugins=plugins,
