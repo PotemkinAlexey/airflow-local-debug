@@ -51,7 +51,7 @@ Expected result:
 Before publishing or sharing internally, decide these points explicitly:
 
 - supported Airflow range
-  Current package metadata is `apache-airflow>=2.10,<4`
+  Current package metadata is `apache-airflow>=2.10,<3`
 - license
   Current placeholder is `LicenseRef-Proprietary`
 - versioning policy

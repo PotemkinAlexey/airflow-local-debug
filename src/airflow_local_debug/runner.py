@@ -22,7 +22,7 @@ import importlib.util
 import logging
 import sys
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Iterable
@@ -74,20 +74,25 @@ def _serialize_datetime(value: Any) -> str | None:
 
 
 def _coerce_logical_date(value: str | date | datetime | None) -> datetime | None:
+    def ensure_aware(value: datetime) -> datetime:
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return value
+        return value.replace(tzinfo=timezone.utc)
+
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
+        return ensure_aware(value)
     if isinstance(value, date):
-        return datetime.combine(value, datetime.min.time())
+        return ensure_aware(datetime.combine(value, datetime.min.time()))
     raw = str(value).strip()
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw)
+        return ensure_aware(datetime.fromisoformat(raw))
     except ValueError:
         if "T" not in raw and " " not in raw:
-            return datetime.fromisoformat(f"{raw}T00:00:00")
+            return ensure_aware(datetime.fromisoformat(f"{raw}T00:00:00"))
         raise
 
 

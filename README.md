@@ -2,6 +2,8 @@
 
 Single-process local debug toolkit for ordinary Apache Airflow DAGs.
 
+Supported Airflow range: `apache-airflow>=2.10,<3`.
+
 ## What it does
 
 - runs a full DAG locally without scheduler/webserver

@@ -13,6 +13,20 @@ def test_classify_problem_timeout() -> None:
     assert category == "timeout"
 
 
+def test_classify_problem_timeout_by_class_name() -> None:
+    category, _, _ = _classify_problem(class_name="ReadTimeout", message="")
+    assert category == "timeout"
+
+
+def test_classify_problem_does_not_match_sql_timeout_column_name() -> None:
+    category, _, _ = _classify_problem(
+        class_name="OperationalError",
+        message="no such table: task_instance SELECT trigger_timeout FROM task_instance",
+    )
+
+    assert category != "timeout"
+
+
 def test_classify_problem_http_status() -> None:
     category, _, _ = _classify_problem(status=500, message="internal server error")
     assert category == "http"

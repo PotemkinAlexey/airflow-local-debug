@@ -14,6 +14,7 @@ look consistent and follow the same classification rules.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import time
 import traceback
@@ -192,6 +193,10 @@ def _has_any(text: str, *parts: str) -> bool:
     return any(part in text for part in parts)
 
 
+def _has_word_any(text: str, *parts: str) -> bool:
+    return any(re.search(rf"(?<![a-z0-9_]){re.escape(part)}(?![a-z0-9_])", text) for part in parts)
+
+
 def _classify_exception(exc: BaseException, summary: dict[str, Any] | None = None) -> tuple[str, str, str]:
     module_name = str(getattr(exc.__class__, "__module__", "") or "")
     class_name = str(getattr(exc.__class__, "__name__", "") or "")
@@ -232,7 +237,11 @@ def _classify_problem(
     message = str(message or "").lower()
     status = _maybe_int(status)
 
-    if (status == 408) or _has_any(message, "timeout", "timed out", "deadline exceeded", "request timed out"):
+    if (
+        status == 408
+        or "timeout" in class_name
+        or _has_word_any(message, "timeout", "timed out", "deadline exceeded", "request timed out")
+    ):
         return ("timeout",) + ERROR_STYLES["timeout"]
     if (status == 429) or _has_any(message, "rate limit", "too many requests", "throttl"):
         return ("http",) + ERROR_STYLES["http"]
