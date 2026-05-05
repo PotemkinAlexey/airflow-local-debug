@@ -1028,7 +1028,7 @@ def debug_dag_file_cli(
     Generic CLI entrypoint for local debugging of any DAG file.
 
     Example:
-        python dags/common/airflow_debug_cli.py /abs/path/to/dag.py --dag-id my_dag --config-path ~/airflow_defaults.py
+        airflow-debug-run /abs/path/to/dag.py --dag-id my_dag --config-path ~/airflow_defaults.py
     """
     parser = argparse.ArgumentParser(description="Local debug runner for an Airflow DAG file")
     parser.add_argument("dag_file", help="Absolute path to the DAG Python file.")
