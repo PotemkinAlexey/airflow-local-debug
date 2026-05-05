@@ -9,7 +9,6 @@ from typing import Any, Iterator, Mapping
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
 from airflow_local_debug.models import LocalConfig
 
-
 _NON_ENV_CHARS = re.compile(r"[^A-Z0-9_]")
 
 
