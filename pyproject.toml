@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airflow-local-debug"
+version = "0.1.0"
+description = "Deterministic single-process local debug toolkit for Apache Airflow DAGs"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Alexei Potiomkin" }
+]
+dependencies = [
+  "apache-airflow>=2.10,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.1",
+  "pytest>=7.4",
+]
+
+[project.scripts]
+airflow-debug-run = "airflow_local_debug.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
