@@ -94,7 +94,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
 
     artifacts = write_run_artifacts(result, tmp_path / "report", include_graph=False)
 
-    assert set(artifacts) == {"result", "report", "exception", "graph"}
+    assert set(artifacts) == {"result", "report", "exception", "graph", "tasks"}
     payload = json.loads(artifacts["result"].read_text(encoding="utf-8"))
     assert payload["dag_id"] == "demo"
     assert payload["graph_svg_path"] == "/tmp/graph.svg"
@@ -113,3 +113,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert "first -> second" not in artifacts["report"].read_text(encoding="utf-8")
     assert artifacts["exception"].read_text(encoding="utf-8") == "Traceback\nboom\n"
     assert artifacts["graph"].read_text(encoding="utf-8") == "demo\n  first -> second\n"
+    assert artifacts["tasks"].read_text(encoding="utf-8").splitlines() == [
+        "task_id,map_index,state,try_number,start_date,end_date,duration_seconds",
+        "first,,failed,,,,2.5",
+    ]

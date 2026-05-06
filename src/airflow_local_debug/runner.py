@@ -1615,7 +1615,7 @@ def debug_dag_cli(
     parser.add_argument(
         "--report-dir",
         dest="report_dir",
-        help="Directory to write run artifacts: report.md, result.json, graph.svg, graph.txt, exception.txt.",
+        help="Directory to write run artifacts: report.md, result.json, tasks.csv, graph.svg, graph.txt, exception.txt.",
     )
     parser.add_argument(
         "--graph-svg-path",
@@ -1726,7 +1726,7 @@ def debug_dag_file_cli(
     parser.add_argument(
         "--report-dir",
         dest="report_dir",
-        help="Directory to write run artifacts: report.md, result.json, graph.svg, graph.txt, exception.txt.",
+        help="Directory to write run artifacts: report.md, result.json, tasks.csv, graph.svg, graph.txt, exception.txt.",
     )
     parser.add_argument(
         "--graph-svg-path",

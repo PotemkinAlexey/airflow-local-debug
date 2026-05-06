@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import csv
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Literal
 
 from airflow_local_debug.models import RunResult
 
-RunArtifactName = Literal["result", "report", "exception", "graph"]
+RunArtifactName = Literal["result", "report", "exception", "graph", "tasks"]
 
 
 def _format_duration(seconds: float | int | None) -> str | None:
@@ -128,5 +129,35 @@ def write_run_artifacts(
         graph_path = target_dir / "graph.txt"
         graph_path.write_text(result.graph_ascii.rstrip() + "\n", encoding="utf-8")
         artifacts["graph"] = graph_path
+
+    if result.tasks:
+        tasks_path = target_dir / "tasks.csv"
+        with tasks_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "task_id",
+                    "map_index",
+                    "state",
+                    "try_number",
+                    "start_date",
+                    "end_date",
+                    "duration_seconds",
+                ],
+            )
+            writer.writeheader()
+            for task in result.tasks:
+                writer.writerow(
+                    {
+                        "task_id": task.task_id,
+                        "map_index": "" if task.map_index is None else task.map_index,
+                        "state": task.state or "",
+                        "try_number": "" if task.try_number is None else task.try_number,
+                        "start_date": task.start_date or "",
+                        "end_date": task.end_date or "",
+                        "duration_seconds": "" if task.duration_seconds is None else task.duration_seconds,
+                    }
+                )
+        artifacts["tasks"] = tasks_path
 
     return artifacts
