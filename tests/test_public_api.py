@@ -10,4 +10,5 @@ def test_public_api_exports_core_entrypoints() -> None:
     assert hasattr(airflow_local_debug, "run_full_dag")
     assert hasattr(airflow_local_debug, "run_doctor")
     assert hasattr(airflow_local_debug, "format_doctor_report")
+    assert hasattr(airflow_local_debug, "write_run_artifacts")
     assert hasattr(airflow_local_debug, "AirflowDebugPlugin")

@@ -78,7 +78,7 @@ from airflow_local_debug.plugins import (
     RepeatedProblemWarningError,
     TaskContextPlugin,
 )
-from airflow_local_debug.report import format_run_report, print_run_report
+from airflow_local_debug.report import format_run_report, print_run_report, write_run_artifacts
 from airflow_local_debug.runner import (
     debug_dag,
     debug_dag_cli,
@@ -155,4 +155,5 @@ __all__ = [
     "TaskContextPlugin",
     "TaskRunInfo",
     "write_dag_svg",
+    "write_run_artifacts",
 ]

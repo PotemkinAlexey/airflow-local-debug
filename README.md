@@ -64,6 +64,7 @@ CLI flags (both entrypoints):
 | `--no-trace` | Disable live per-task console tracing |
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |
+| `--report-dir` | Write `report.md`, `result.json`, and optional `graph.txt` / `exception.txt` |
 
 ## Doctor
 
@@ -151,6 +152,9 @@ class RunResult:
     @property
     def ok(self) -> bool: ...      # True only when state == "success" and no exception
 ```
+
+For a persisted snapshot from the convenience CLI/API, pass
+`--report-dir ./airflow-debug-report` or `report_dir="..."`.
 
 ## Plugins
 

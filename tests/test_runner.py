@@ -272,3 +272,67 @@ def test_backend_hint_falls_back_to_dag_run_or_unsupported() -> None:
 
     assert runner._backend_hint(HasRun(), fail_fast=False) == "dag.run"
     assert runner._backend_hint(HasNothing(), fail_fast=False) == "unsupported"
+
+
+# --- CLI argument plumbing ------------------------------------------------
+
+
+def test_debug_dag_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured["dag"] = dag
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    dag = FakeDag(task_dict={})
+
+    result = runner.debug_dag_cli(
+        dag,
+        argv=["--report-dir", str(tmp_path), "--include-graph-in-report"],
+    )
+
+    assert result.ok
+    assert captured["dag"] is dag
+    assert captured["report_dir"] == str(tmp_path)
+    assert captured["include_graph_in_report"] is True
+
+
+def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    def fake_run_full_dag(dag: Any, **kwargs: Any) -> RunResult:
+        return RunResult(dag_id="demo", state="success", graph_ascii="demo\n  first")
+
+    monkeypatch.setattr(runner, "run_full_dag", fake_run_full_dag)
+
+    result = runner.debug_dag(
+        FakeDag(task_dict={}),
+        report_dir=tmp_path / "artifacts",
+        include_graph_in_report=True,
+        raise_on_failure=False,
+    )
+
+    assert result.ok
+    assert result.notes[-1] == f"Wrote run artifacts to {(tmp_path / 'artifacts').resolve()}"
+    assert (tmp_path / "artifacts" / "result.json").exists()
+    assert (tmp_path / "artifacts" / "report.md").exists()
+    assert (tmp_path / "artifacts" / "graph.txt").exists()
+
+
+def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag_from_file(dag_file: str, **kwargs: Any) -> RunResult:
+        captured["dag_file"] = dag_file
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag_from_file", fake_debug_dag_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=["/tmp/demo_dag.py", "--report-dir", str(tmp_path)],
+    )
+
+    assert result.ok
+    assert captured["dag_file"] == "/tmp/demo_dag.py"
+    assert captured["report_dir"] == str(tmp_path)

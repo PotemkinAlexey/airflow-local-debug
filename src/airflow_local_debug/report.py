@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+import json
+from pathlib import Path
+from typing import Literal
+
 from airflow_local_debug.models import RunResult
+
+RunArtifactName = Literal["result", "report", "exception", "graph"]
 
 
 def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
@@ -46,3 +53,43 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
 
 def print_run_report(result: RunResult, *, include_graph: bool = False) -> None:
     print(format_run_report(result, include_graph=include_graph))
+
+
+def write_run_artifacts(
+    result: RunResult,
+    report_dir: str | Path,
+    *,
+    include_graph: bool = False,
+) -> dict[RunArtifactName, Path]:
+    target_dir = Path(report_dir).expanduser()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = target_dir.resolve()
+
+    artifacts: dict[RunArtifactName, Path] = {}
+
+    result_path = target_dir / "result.json"
+    result_path.write_text(
+        json.dumps(asdict(result), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    artifacts["result"] = result_path
+
+    report_path = target_dir / "report.md"
+    report_path.write_text(
+        format_run_report(result, include_graph=include_graph) + "\n",
+        encoding="utf-8",
+    )
+    artifacts["report"] = report_path
+
+    exception_text = result.exception_raw or result.exception
+    if exception_text:
+        exception_path = target_dir / "exception.txt"
+        exception_path.write_text(exception_text.rstrip() + "\n", encoding="utf-8")
+        artifacts["exception"] = exception_path
+
+    if result.graph_ascii:
+        graph_path = target_dir / "graph.txt"
+        graph_path.write_text(result.graph_ascii.rstrip() + "\n", encoding="utf-8")
+        artifacts["graph"] = graph_path
+
+    return artifacts

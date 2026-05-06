@@ -425,6 +425,16 @@ def _normalize_result(result: RunResult) -> RunResult:
     return result
 
 
+def _write_report_artifacts(result: RunResult, report_dir: str | Path, *, include_graph: bool) -> None:
+    from airflow_local_debug.report import write_run_artifacts
+
+    resolved_report_dir = Path(report_dir).expanduser()
+    resolved_report_dir.mkdir(parents=True, exist_ok=True)
+    resolved_report_dir = resolved_report_dir.resolve()
+    result.notes.append(f"Wrote run artifacts to {resolved_report_dir}")
+    write_run_artifacts(result, resolved_report_dir, include_graph=include_graph)
+
+
 def _add_logger_if_needed(ti: Any) -> None:
     task_log = getattr(ti, "log", None)
     handlers = getattr(task_log, "handlers", None)
@@ -1372,6 +1382,7 @@ def debug_dag(
     trace: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
+    report_dir: str | Path | None = None,
     raise_on_failure: bool = True,
     fail_fast: bool = True,
 ) -> RunResult:
@@ -1393,6 +1404,8 @@ def debug_dag(
         fail_fast=fail_fast,
         plugins=plugins,
     )
+    if report_dir is not None:
+        _write_report_artifacts(result, report_dir, include_graph=include_graph_in_report)
     print_run_report(result, include_graph=include_graph_in_report)
     if raise_on_failure and not result.ok:
         raise SystemExit(1)
@@ -1438,6 +1451,11 @@ def debug_dag_cli(
         action="store_true",
         help="Include the rendered DAG graph in the final report (useful for sharing).",
     )
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        help="Directory to write run artifacts: report.md, result.json, graph.txt, exception.txt.",
+    )
     args = parser.parse_args(argv)
 
     if require_config_path and not args.config_path:
@@ -1450,6 +1468,7 @@ def debug_dag_cli(
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
+        report_dir=args.report_dir,
         **kwargs,
     )
 
@@ -1496,6 +1515,11 @@ def debug_dag_file_cli(
         action="store_true",
         help="Include the rendered DAG graph in the final report (useful for sharing).",
     )
+    parser.add_argument(
+        "--report-dir",
+        dest="report_dir",
+        help="Directory to write run artifacts: report.md, result.json, graph.txt, exception.txt.",
+    )
     args = parser.parse_args(argv)
 
     return debug_dag_from_file(
@@ -1506,6 +1530,7 @@ def debug_dag_file_cli(
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
+        report_dir=args.report_dir,
     )
 
 
@@ -1575,6 +1600,7 @@ def debug_dag_from_file(
     trace: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
+    report_dir: str | Path | None = None,
     raise_on_failure: bool = True,
     fail_fast: bool = True,
 ) -> RunResult:
@@ -1596,6 +1622,8 @@ def debug_dag_from_file(
         fail_fast=fail_fast,
         plugins=plugins,
     )
+    if report_dir is not None:
+        _write_report_artifacts(result, report_dir, include_graph=include_graph_in_report)
     print_run_report(result, include_graph=include_graph_in_report)
     if raise_on_failure and not result.ok:
         raise SystemExit(1)
