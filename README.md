@@ -96,6 +96,7 @@ airflow-debug-doctor \
 
 The doctor checks Airflow import/version support, metadata DB readiness, local
 config shape, and optional DAG import / Airflow 3 serialization.
+Pass `--json` when CI or another tool needs a machine-readable result.
 
 ## Local config
 

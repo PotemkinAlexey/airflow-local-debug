@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -7,9 +8,12 @@ import pytest
 from airflow_local_debug.doctor import (
     DoctorCheck,
     DoctorResult,
+    build_parser,
     check_dag_file,
     check_local_config,
     check_metadata_db,
+    doctor_result_to_dict,
+    format_doctor_json,
     format_doctor_report,
     is_supported_airflow_version,
 )
@@ -113,3 +117,43 @@ def test_format_doctor_report_includes_verdict() -> None:
     assert "[OK] Airflow version: supported" in report
     assert "[FAIL] Local config: missing" in report
     assert report.endswith("Verdict: FAIL")
+
+
+def test_format_doctor_json_is_machine_readable() -> None:
+    result = DoctorResult(
+        checks=[
+            DoctorCheck(
+                name="Airflow version",
+                status="ok",
+                message="supported",
+                details=["apache-airflow 3.2.1"],
+            ),
+            DoctorCheck(name="Metadata DB", status="warn", message="not checked"),
+        ]
+    )
+
+    payload = doctor_result_to_dict(result)
+    rendered = format_doctor_json(result)
+
+    assert payload["ok"] is True
+    assert payload["exit_code"] == 0
+    assert payload["checks"] == [
+        {
+            "details": ["apache-airflow 3.2.1"],
+            "message": "supported",
+            "name": "Airflow version",
+            "status": "ok",
+        },
+        {
+            "details": [],
+            "message": "not checked",
+            "name": "Metadata DB",
+            "status": "warn",
+        },
+    ]
+    assert json.loads(rendered) == payload
+
+
+def test_doctor_parser_accepts_json_flag() -> None:
+    args = build_parser().parse_args(["--json"])
+    assert args.json is True

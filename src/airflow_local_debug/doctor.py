@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -323,6 +324,18 @@ def format_doctor_report(result: DoctorResult) -> str:
     return "\n".join(lines)
 
 
+def doctor_result_to_dict(result: DoctorResult) -> dict[str, object]:
+    return {
+        "ok": result.ok,
+        "exit_code": result.exit_code,
+        "checks": [asdict(check) for check in result.checks],
+    }
+
+
+def format_doctor_json(result: DoctorResult) -> str:
+    return json.dumps(doctor_result_to_dict(result), indent=2, sort_keys=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate local airflow-local-debug prerequisites.")
     parser.add_argument("--config-path", help="Local Airflow config file to validate.")
@@ -333,6 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dag-file", help="Optional DAG file to import and validate.")
     parser.add_argument("--dag-id", help="DAG ID to select when --dag-file contains multiple DAGs.")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of the text report.")
     return parser
 
 
@@ -345,7 +359,7 @@ def main(argv: list[str] | None = None) -> None:
         dag_path=args.dag_file,
         dag_id=args.dag_id,
     )
-    print(format_doctor_report(result))
+    print(format_doctor_json(result) if args.json else format_doctor_report(result))
     sys.exit(result.exit_code)
 
 
