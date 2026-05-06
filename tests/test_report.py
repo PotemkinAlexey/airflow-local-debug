@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from xml.etree import ElementTree
 
 from airflow_local_debug.models import RunResult, TaskRunInfo
 from airflow_local_debug.report import _format_duration, format_run_report, write_run_artifacts
@@ -86,7 +87,10 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
         config_path="/tmp/airflow_defaults.py",
         graph_ascii="demo\n  first -> second",
         graph_svg_path="/tmp/graph.svg",
-        tasks=[TaskRunInfo(task_id="first", state="failed", duration_seconds=2.5)],
+        tasks=[
+            TaskRunInfo(task_id="first", state="failed", duration_seconds=2.5),
+            TaskRunInfo(task_id="second", state="skipped", duration_seconds=0),
+        ],
         notes=["note"],
         exception="pretty boom",
         exception_raw="Traceback\nboom",
@@ -94,21 +98,19 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
 
     artifacts = write_run_artifacts(result, tmp_path / "report", include_graph=False)
 
-    assert set(artifacts) == {"result", "report", "exception", "graph", "tasks"}
+    assert set(artifacts) == {"result", "report", "exception", "graph", "tasks", "junit"}
     payload = json.loads(artifacts["result"].read_text(encoding="utf-8"))
     assert payload["dag_id"] == "demo"
     assert payload["graph_svg_path"] == "/tmp/graph.svg"
-    assert payload["tasks"] == [
-        {
-            "end_date": None,
-            "duration_seconds": 2.5,
-            "map_index": None,
-            "start_date": None,
-            "state": "failed",
-            "task_id": "first",
-            "try_number": None,
-        }
-    ]
+    assert payload["tasks"][0] == {
+        "end_date": None,
+        "duration_seconds": 2.5,
+        "map_index": None,
+        "start_date": None,
+        "state": "failed",
+        "task_id": "first",
+        "try_number": None,
+    }
     assert "DAG: demo" in artifacts["report"].read_text(encoding="utf-8")
     assert "first -> second" not in artifacts["report"].read_text(encoding="utf-8")
     assert artifacts["exception"].read_text(encoding="utf-8") == "Traceback\nboom\n"
@@ -116,4 +118,16 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert artifacts["tasks"].read_text(encoding="utf-8").splitlines() == [
         "task_id,map_index,state,try_number,start_date,end_date,duration_seconds",
         "first,,failed,,,,2.5",
+        "second,,skipped,,,,0",
     ]
+
+    suite = ElementTree.parse(artifacts["junit"]).getroot()
+    assert suite.tag == "testsuite"
+    assert suite.attrib["name"] == "demo"
+    assert suite.attrib["tests"] == "2"
+    assert suite.attrib["failures"] == "1"
+    assert suite.attrib["skipped"] == "1"
+    cases = suite.findall("testcase")
+    assert [case.attrib["name"] for case in cases] == ["first", "second"]
+    assert cases[0].find("failure") is not None
+    assert cases[1].find("skipped") is not None

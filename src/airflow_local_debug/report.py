@@ -6,10 +6,14 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 from typing import Literal
+from xml.etree import ElementTree
 
 from airflow_local_debug.models import RunResult
 
-RunArtifactName = Literal["result", "report", "exception", "graph", "tasks"]
+RunArtifactName = Literal["result", "report", "exception", "graph", "tasks", "junit"]
+
+_FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
+_SKIPPED_TASK_STATES = {"skipped", "not_run", "removed"}
 
 
 def _format_duration(seconds: float | int | None) -> str | None:
@@ -41,6 +45,46 @@ def _task_state_summary(result: RunResult) -> str | None:
         return None
     counts = Counter(task.state or "unknown" for task in result.tasks)
     return ", ".join(f"{state}={counts[state]}" for state in sorted(counts))
+
+
+def _write_junit_xml(result: RunResult, path: Path) -> None:
+    total_time = sum(float(task.duration_seconds or 0) for task in result.tasks)
+    failures = sum(1 for task in result.tasks if (task.state or "unknown") in _FAILED_TASK_STATES)
+    skipped = sum(1 for task in result.tasks if (task.state or "unknown") in _SKIPPED_TASK_STATES)
+    suite = ElementTree.Element(
+        "testsuite",
+        {
+            "name": result.dag_id,
+            "tests": str(len(result.tasks)),
+            "failures": str(failures),
+            "errors": "0",
+            "skipped": str(skipped),
+            "time": f"{total_time:.6f}",
+        },
+    )
+    if result.run_id:
+        suite.set("id", result.run_id)
+
+    for task in result.tasks:
+        state = task.state or "unknown"
+        case = ElementTree.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": result.dag_id,
+                "name": task.task_id if task.map_index is None or task.map_index < 0 else f"{task.task_id}[{task.map_index}]",
+                "time": f"{float(task.duration_seconds or 0):.6f}",
+            },
+        )
+        if state in _FAILED_TASK_STATES:
+            failure = ElementTree.SubElement(case, "failure", {"message": f"Task state: {state}", "type": state})
+            failure.text = result.exception_raw or result.exception or f"Task {task.task_id} finished in state {state}."
+        elif state in _SKIPPED_TASK_STATES:
+            ElementTree.SubElement(case, "skipped", {"message": f"Task state: {state}"})
+
+    tree = ElementTree.ElementTree(suite)
+    ElementTree.indent(tree, space="  ")
+    tree.write(path, encoding="utf-8", xml_declaration=True)
 
 
 def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
@@ -159,5 +203,9 @@ def write_run_artifacts(
                     }
                 )
         artifacts["tasks"] = tasks_path
+
+        junit_path = target_dir / "junit.xml"
+        _write_junit_xml(result, junit_path)
+        artifacts["junit"] = junit_path
 
     return artifacts

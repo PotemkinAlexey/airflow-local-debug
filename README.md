@@ -73,7 +73,7 @@ CLI flags (both entrypoints):
 | `--no-trace` | Disable live per-task console tracing |
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |
-| `--report-dir` | Write `report.md`, `result.json`, `tasks.csv`, `graph.svg`, and optional `graph.txt` / `exception.txt` |
+| `--report-dir` | Write `report.md`, `result.json`, `tasks.csv`, `junit.xml`, `graph.svg`, and optional `graph.txt` / `exception.txt` |
 | `--graph-svg-path` | Write the rendered DAG graph SVG (defaults to `graph.svg` inside `--report-dir`) |
 
 File-based runner only:
