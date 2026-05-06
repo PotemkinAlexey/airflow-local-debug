@@ -303,6 +303,25 @@ def test_backend_hint_falls_back_to_dag_run_or_unsupported() -> None:
     assert runner._backend_hint(HasNothing(), fail_fast=False) == "unsupported"
 
 
+# --- graph SVG artifact plumbing -----------------------------------------
+
+
+def test_resolve_graph_svg_path_defaults_to_report_dir(tmp_path) -> None:
+    assert runner._resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path=None) == tmp_path / "graph.svg"
+    assert runner._resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path="/tmp/custom.svg") == "/tmp/custom.svg"
+    assert runner._resolve_graph_svg_path(report_dir=None, graph_svg_path=None) is None
+
+
+def test_attach_graph_svg_writes_path(tmp_path) -> None:
+    result = RunResult(dag_id="demo", state="success")
+    output_path = tmp_path / "graph.svg"
+
+    runner._attach_graph_svg(FakeDag(task_dict={}), result, output_path)
+
+    assert result.graph_svg_path == str(output_path.resolve())
+    assert output_path.read_text(encoding="utf-8").startswith("<svg")
+
+
 # --- CLI argument plumbing ------------------------------------------------
 
 
@@ -325,7 +344,26 @@ def test_debug_dag_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert result.ok
     assert captured["dag"] is dag
     assert captured["report_dir"] == str(tmp_path)
+    assert captured["graph_svg_path"] is None
     assert captured["include_graph_in_report"] is True
+
+
+def test_debug_dag_cli_passes_graph_svg_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=["--graph-svg-path", "/tmp/graph.svg"],
+    )
+
+    assert result.ok
+    assert captured["graph_svg_path"] == "/tmp/graph.svg"
 
 
 def test_debug_dag_cli_passes_conf_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,8 +404,17 @@ def test_debug_dag_cli_preserves_programmatic_conf(monkeypatch: pytest.MonkeyPat
 
 
 def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+
     def fake_run_full_dag(dag: Any, **kwargs: Any) -> RunResult:
-        return RunResult(dag_id="demo", state="success", graph_ascii="demo\n  first")
+        captured.update(kwargs)
+        graph_svg_path = kwargs["graph_svg_path"]
+        return RunResult(
+            dag_id="demo",
+            state="success",
+            graph_ascii="demo\n  first",
+            graph_svg_path=str(graph_svg_path),
+        )
 
     monkeypatch.setattr(runner, "run_full_dag", fake_run_full_dag)
 
@@ -379,10 +426,13 @@ def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) 
     )
 
     assert result.ok
+    assert captured["graph_svg_path"] == tmp_path / "artifacts" / "graph.svg"
+    assert result.graph_svg_path == str(tmp_path / "artifacts" / "graph.svg")
     assert result.notes[-1] == f"Wrote run artifacts to {(tmp_path / 'artifacts').resolve()}"
     assert (tmp_path / "artifacts" / "result.json").exists()
     assert (tmp_path / "artifacts" / "report.md").exists()
     assert (tmp_path / "artifacts" / "graph.txt").exists()
+    assert "Graph SVG:" in (tmp_path / "artifacts" / "report.md").read_text(encoding="utf-8")
 
 
 def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -402,6 +452,7 @@ def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, t
     assert result.ok
     assert captured["dag_file"] == "/tmp/demo_dag.py"
     assert captured["report_dir"] == str(tmp_path)
+    assert captured["graph_svg_path"] is None
 
 
 def test_debug_dag_file_cli_passes_conf_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -463,6 +463,30 @@ def _write_report_artifacts(result: RunResult, report_dir: str | Path, *, includ
     write_run_artifacts(result, resolved_report_dir, include_graph=include_graph)
 
 
+def _resolve_graph_svg_path(
+    *,
+    report_dir: str | Path | None,
+    graph_svg_path: str | Path | None,
+) -> str | Path | None:
+    if graph_svg_path is not None:
+        return graph_svg_path
+    if report_dir is None:
+        return None
+    return Path(report_dir).expanduser() / "graph.svg"
+
+
+def _attach_graph_svg(dag: Any, result: RunResult, graph_svg_path: str | Path | None) -> None:
+    if graph_svg_path is None:
+        return
+
+    from airflow_local_debug.graph import write_dag_svg
+
+    try:
+        result.graph_svg_path = write_dag_svg(dag, str(graph_svg_path))
+    except Exception as exc:
+        result.notes.append(f"Could not write DAG graph SVG to {Path(graph_svg_path).expanduser()}: {exc}")
+
+
 def _add_logger_if_needed(ti: Any) -> None:
     task_log = getattr(ti, "log", None)
     handlers = getattr(task_log, "handlers", None)
@@ -1156,6 +1180,7 @@ def _execute_full_dag(
     fail_fast: bool,
     plugins: Iterable[AirflowDebugPlugin] | None,
     notes: list[str],
+    graph_svg_path: str | Path | None = None,
 ) -> RunResult:
     backend: str | None = None
     dagrun = None
@@ -1293,6 +1318,7 @@ def _execute_full_dag(
                 exception="Local DAG run did not produce a result.",
                 exception_raw="Local DAG run did not produce a result.",
             )
+        _attach_graph_svg(dag, result, graph_svg_path)
         plugin_manager.after_run(dag, run_context, result)
 
     if pending_base_exception is not None:
@@ -1351,6 +1377,7 @@ def run_full_dag(
     logical_date: str | date | datetime | None = None,
     conf: dict[str, Any] | None = None,
     extra_env: dict[str, str] | None = None,
+    graph_svg_path: str | Path | None = None,
     trace: bool = True,
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
@@ -1377,7 +1404,7 @@ def run_full_dag(
             local_config = LocalConfig()
     except Exception as exc:
         error_raw = traceback.format_exc()
-        return RunResult(
+        result = RunResult(
             dag_id=getattr(dag, "dag_id", "<unknown>"),
             backend=_backend_hint(dag, fail_fast=fail_fast),
             airflow_version=get_airflow_version(),
@@ -1386,6 +1413,8 @@ def run_full_dag(
             exception=format_pretty_exception(exc, task_id=getattr(dag, "dag_id", "<dag>")),
             exception_raw=error_raw,
         )
+        _attach_graph_svg(dag, result, graph_svg_path)
+        return result
     return _execute_full_dag(
         dag,
         local_config=local_config,
@@ -1397,6 +1426,7 @@ def run_full_dag(
         fail_fast=fail_fast,
         plugins=plugins,
         notes=notes,
+        graph_svg_path=graph_svg_path,
     )
 
 
@@ -1407,6 +1437,7 @@ def debug_dag(
     logical_date: str | date | datetime | None = None,
     conf: dict[str, Any] | None = None,
     extra_env: dict[str, str] | None = None,
+    graph_svg_path: str | Path | None = None,
     trace: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
@@ -1422,12 +1453,14 @@ def debug_dag(
     """
     from airflow_local_debug.report import print_run_report
 
+    resolved_graph_svg_path = _resolve_graph_svg_path(report_dir=report_dir, graph_svg_path=graph_svg_path)
     result = run_full_dag(
         dag,
         config_path=config_path,
         logical_date=logical_date,
         conf=conf,
         extra_env=extra_env,
+        graph_svg_path=resolved_graph_svg_path,
         trace=trace,
         fail_fast=fail_fast,
         plugins=plugins,
@@ -1492,7 +1525,12 @@ def debug_dag_cli(
     parser.add_argument(
         "--report-dir",
         dest="report_dir",
-        help="Directory to write run artifacts: report.md, result.json, graph.txt, exception.txt.",
+        help="Directory to write run artifacts: report.md, result.json, graph.svg, graph.txt, exception.txt.",
+    )
+    parser.add_argument(
+        "--graph-svg-path",
+        dest="graph_svg_path",
+        help="Path to write the rendered DAG graph SVG (defaults to graph.svg inside --report-dir).",
     )
     args = parser.parse_args(argv)
 
@@ -1518,6 +1556,7 @@ def debug_dag_cli(
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
         report_dir=args.report_dir,
+        graph_svg_path=args.graph_svg_path,
         **kwargs,
     )
 
@@ -1577,7 +1616,12 @@ def debug_dag_file_cli(
     parser.add_argument(
         "--report-dir",
         dest="report_dir",
-        help="Directory to write run artifacts: report.md, result.json, graph.txt, exception.txt.",
+        help="Directory to write run artifacts: report.md, result.json, graph.svg, graph.txt, exception.txt.",
+    )
+    parser.add_argument(
+        "--graph-svg-path",
+        dest="graph_svg_path",
+        help="Path to write the rendered DAG graph SVG (defaults to graph.svg inside --report-dir).",
     )
     args = parser.parse_args(argv)
 
@@ -1596,6 +1640,7 @@ def debug_dag_file_cli(
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
         report_dir=args.report_dir,
+        graph_svg_path=args.graph_svg_path,
     )
 
 
@@ -1607,6 +1652,7 @@ def run_full_dag_from_file(
     logical_date: str | date | datetime | None = None,
     conf: dict[str, Any] | None = None,
     extra_env: dict[str, str] | None = None,
+    graph_svg_path: str | Path | None = None,
     trace: bool = True,
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
@@ -1642,6 +1688,7 @@ def run_full_dag_from_file(
                 fail_fast=fail_fast,
                 plugins=plugins,
                 notes=notes,
+                graph_svg_path=graph_svg_path,
             )
     except Exception as exc:
         error_raw = traceback.format_exc()
@@ -1662,6 +1709,7 @@ def debug_dag_from_file(
     logical_date: str | date | datetime | None = None,
     conf: dict[str, Any] | None = None,
     extra_env: dict[str, str] | None = None,
+    graph_svg_path: str | Path | None = None,
     trace: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
@@ -1676,6 +1724,7 @@ def debug_dag_from_file(
     """
     from airflow_local_debug.report import print_run_report
 
+    resolved_graph_svg_path = _resolve_graph_svg_path(report_dir=report_dir, graph_svg_path=graph_svg_path)
     result = run_full_dag_from_file(
         dag_file,
         dag_id=dag_id,
@@ -1683,6 +1732,7 @@ def debug_dag_from_file(
         logical_date=logical_date,
         conf=conf,
         extra_env=extra_env,
+        graph_svg_path=resolved_graph_svg_path,
         trace=trace,
         fail_fast=fail_fast,
         plugins=plugins,

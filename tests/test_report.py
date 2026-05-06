@@ -35,6 +35,18 @@ def test_format_run_report_prints_exception_when_not_logged() -> None:
     assert "boom" in rendered
 
 
+def test_format_run_report_prints_graph_svg_path() -> None:
+    result = RunResult(
+        dag_id="demo",
+        state="success",
+        graph_svg_path="/tmp/graph.svg",
+    )
+
+    rendered = format_run_report(result)
+
+    assert "Graph SVG: /tmp/graph.svg" in rendered
+
+
 def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     result = RunResult(
         dag_id="demo",
@@ -45,6 +57,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
         airflow_version="3.2.1",
         config_path="/tmp/airflow_defaults.py",
         graph_ascii="demo\n  first -> second",
+        graph_svg_path="/tmp/graph.svg",
         tasks=[TaskRunInfo(task_id="first", state="failed")],
         notes=["note"],
         exception="pretty boom",
@@ -56,6 +69,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert set(artifacts) == {"result", "report", "exception", "graph"}
     payload = json.loads(artifacts["result"].read_text(encoding="utf-8"))
     assert payload["dag_id"] == "demo"
+    assert payload["graph_svg_path"] == "/tmp/graph.svg"
     assert payload["tasks"] == [
         {
             "end_date": None,

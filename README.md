@@ -66,7 +66,8 @@ CLI flags (both entrypoints):
 | `--no-trace` | Disable live per-task console tracing |
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |
-| `--report-dir` | Write `report.md`, `result.json`, and optional `graph.txt` / `exception.txt` |
+| `--report-dir` | Write `report.md`, `result.json`, `graph.svg`, and optional `graph.txt` / `exception.txt` |
+| `--graph-svg-path` | Write the rendered DAG graph SVG (defaults to `graph.svg` inside `--report-dir`) |
 
 ## Doctor
 
@@ -206,6 +207,9 @@ from airflow_local_debug import render_dag_svg, write_dag_svg
 svg_path = write_dag_svg(dag)              # /tmp/airflow_debug_graphs/<dag>_<ts>.svg
 svg_text = render_dag_svg(dag)             # raw SVG string
 ```
+
+When `--report-dir` is used, the CLI also writes `graph.svg` and includes its
+path in the final report.
 
 ## Library-mode usage (no global state mutation)
 
