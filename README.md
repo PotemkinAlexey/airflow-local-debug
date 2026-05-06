@@ -65,6 +65,20 @@ CLI flags (both entrypoints):
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |
 
+## Doctor
+
+Validate local prerequisites before running a DAG:
+
+```bash
+airflow-debug-doctor \
+  --config-path /absolute/path/to/airflow_defaults.py \
+  --dag-file /absolute/path/to/my_dag.py \
+  --dag-id my_dag
+```
+
+The doctor checks Airflow import/version support, metadata DB readiness, local
+config shape, and optional DAG import / Airflow 3 serialization.
+
 ## Local config
 
 The library can load a Python config module with optional globals:

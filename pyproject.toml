@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 airflow-debug-run = "airflow_local_debug.cli:main"
+airflow-debug-doctor = "airflow_local_debug.doctor:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

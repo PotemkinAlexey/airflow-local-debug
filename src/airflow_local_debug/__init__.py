@@ -7,6 +7,7 @@ Entrypoints
 - `debug_dag_from_file(path, ...)` — same, but loads the DAG from a file
 - `debug_dag_cli(dag)` — argparse wrapper for `python my_dag.py ...`
 - `debug_dag_file_cli()` — argparse wrapper for the `airflow-debug-run` script
+- `run_doctor(...)` — validate local Airflow/debug prerequisites
 - `run_full_dag(dag, ...)` / `run_full_dag_from_file(...)` — return raw `RunResult`
 
 Result object
@@ -56,6 +57,8 @@ Library usage (no global state mutation)
             ...
 """
 
+from importlib import import_module
+
 from airflow_local_debug.bootstrap import (
     ensure_quiet_airflow_bootstrap,
     silence_airflow_bootstrap_warnings,
@@ -86,6 +89,28 @@ from airflow_local_debug.runner import (
 )
 from airflow_local_debug.traceback_utils import StepTracer, StepTracerOptions, format_pretty_exception, safe_repr, shrink
 
+_DOCTOR_EXPORTS = {
+    "DoctorCheck",
+    "DoctorResult",
+    "check_airflow_import",
+    "check_dag_file",
+    "check_local_config",
+    "check_metadata_db",
+    "format_doctor_report",
+    "is_supported_airflow_version",
+    "run_doctor",
+}
+
+
+def __getattr__(name: str):
+    if name in _DOCTOR_EXPORTS:
+        module = import_module("airflow_local_debug.doctor")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "AirflowDebugPlugin",
     "bootstrap_airflow_env",
@@ -95,8 +120,15 @@ __all__ = [
     "debug_dag_file_cli",
     "debug_dag_from_file",
     "DebugPluginManager",
+    "DoctorCheck",
+    "DoctorResult",
     "ensure_quiet_airflow_bootstrap",
+    "check_airflow_import",
+    "check_dag_file",
+    "check_local_config",
+    "check_metadata_db",
     "format_dag_graph",
+    "format_doctor_report",
     "format_pretty_exception",
     "format_run_report",
     "get_airflow_version",
@@ -109,6 +141,8 @@ __all__ = [
     "ProblemLogPlugin",
     "render_dag_svg",
     "RepeatedProblemWarningError",
+    "is_supported_airflow_version",
+    "run_doctor",
     "run_full_dag",
     "run_full_dag_from_file",
     "RunResult",
