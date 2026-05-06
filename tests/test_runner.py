@@ -106,6 +106,35 @@ def test_coerce_logical_date_rejects_garbage() -> None:
         runner._coerce_logical_date("not a date at all")
 
 
+# --- _load_cli_conf -------------------------------------------------------
+
+
+def test_load_cli_conf_parses_json_object() -> None:
+    assert runner._load_cli_conf(conf_json='{"dataset": "daily", "limit": 10}') == {
+        "dataset": "daily",
+        "limit": 10,
+    }
+
+
+def test_load_cli_conf_reads_json_file(tmp_path) -> None:
+    conf_file = tmp_path / "conf.json"
+    conf_file.write_text('{"enabled": true}', encoding="utf-8")
+
+    assert runner._load_cli_conf(conf_file=str(conf_file)) == {"enabled": True}
+
+
+def test_load_cli_conf_rejects_invalid_payloads(tmp_path) -> None:
+    conf_file = tmp_path / "conf.json"
+    conf_file.write_text("[1, 2, 3]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="either --conf-json or --conf-file"):
+        runner._load_cli_conf(conf_json="{}", conf_file=str(conf_file))
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        runner._load_cli_conf(conf_file=str(conf_file))
+    with pytest.raises(ValueError, match="Invalid DAG run conf JSON"):
+        runner._load_cli_conf(conf_json="{broken")
+
+
 # --- _state_token / _task_state_buckets -----------------------------------
 
 
@@ -299,6 +328,43 @@ def test_debug_dag_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert captured["include_graph_in_report"] is True
 
 
+def test_debug_dag_cli_passes_conf_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=["--conf-json", '{"dataset": "daily"}'],
+    )
+
+    assert result.ok
+    assert captured["conf"] == {"dataset": "daily"}
+
+
+def test_debug_dag_cli_preserves_programmatic_conf(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=[],
+        conf={"dataset": "daily"},
+    )
+
+    assert result.ok
+    assert captured["conf"] == {"dataset": "daily"}
+
+
 def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     def fake_run_full_dag(dag: Any, **kwargs: Any) -> RunResult:
         return RunResult(dag_id="demo", state="success", graph_ascii="demo\n  first")
@@ -336,3 +402,22 @@ def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, t
     assert result.ok
     assert captured["dag_file"] == "/tmp/demo_dag.py"
     assert captured["report_dir"] == str(tmp_path)
+
+
+def test_debug_dag_file_cli_passes_conf_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+    conf_file = tmp_path / "conf.json"
+    conf_file.write_text('{"dataset": "hourly"}', encoding="utf-8")
+
+    def fake_debug_dag_from_file(dag_file: str, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag_from_file", fake_debug_dag_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=["/tmp/demo_dag.py", "--conf-file", str(conf_file)],
+    )
+
+    assert result.ok
+    assert captured["conf"] == {"dataset": "hourly"}

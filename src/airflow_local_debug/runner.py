@@ -19,6 +19,7 @@ import argparse
 from contextlib import contextmanager
 import hashlib
 import importlib.util
+import json
 import logging
 import sys
 import traceback
@@ -96,6 +97,33 @@ def _coerce_logical_date(value: str | date | datetime | None) -> datetime | None
         if "T" not in raw and " " not in raw:
             return ensure_aware(datetime.fromisoformat(f"{raw}T00:00:00"))
         raise
+
+
+def _load_cli_conf(*, conf_json: str | None = None, conf_file: str | None = None) -> dict[str, Any] | None:
+    if conf_json is not None and conf_file is not None:
+        raise ValueError("Use either --conf-json or --conf-file, not both.")
+
+    if conf_file is not None:
+        path = Path(conf_file).expanduser()
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(f"Could not read --conf-file {path}: {exc}") from exc
+    elif conf_json is not None:
+        raw = conf_json
+    else:
+        return None
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid DAG run conf JSON: {exc.msg} at line {exc.lineno} column {exc.colno}."
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("DAG run conf must be a JSON object.")
+    return payload
 
 
 def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
@@ -1437,6 +1465,16 @@ def debug_dag_cli(
         help="Logical date / execution date for the local DAG run.",
     )
     parser.add_argument(
+        "--conf-json",
+        dest="conf_json",
+        help="JSON object to pass as dag_run.conf.",
+    )
+    parser.add_argument(
+        "--conf-file",
+        dest="conf_file",
+        help="Path to a JSON object file to pass as dag_run.conf.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1461,10 +1499,21 @@ def debug_dag_cli(
     if require_config_path and not args.config_path:
         parser.error("--config-path is required for this DAG entrypoint.")
 
+    try:
+        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if conf is None:
+        conf = kwargs.pop("conf", None)
+    else:
+        kwargs.pop("conf", None)
+
     return debug_dag(
         dag,
         config_path=args.config_path,
         logical_date=args.logical_date,
+        conf=conf,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
@@ -1501,6 +1550,16 @@ def debug_dag_file_cli(
         help="Logical date / execution date for the local DAG run.",
     )
     parser.add_argument(
+        "--conf-json",
+        dest="conf_json",
+        help="JSON object to pass as dag_run.conf.",
+    )
+    parser.add_argument(
+        "--conf-file",
+        dest="conf_file",
+        help="Path to a JSON object file to pass as dag_run.conf.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1522,11 +1581,17 @@ def debug_dag_file_cli(
     )
     args = parser.parse_args(argv)
 
+    try:
+        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     return debug_dag_from_file(
         args.dag_file,
         dag_id=args.dag_id,
         config_path=args.config_path,
         logical_date=args.logical_date,
+        conf=conf,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
