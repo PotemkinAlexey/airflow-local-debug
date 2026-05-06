@@ -37,6 +37,8 @@ class FakeTI:
     task_id: str
     state: Any = None
     map_index: int | None = -1
+    start_date: Any = None
+    end_date: Any = None
 
 
 class FakeDagrun:
@@ -64,6 +66,15 @@ def test_serialize_datetime_falls_back_to_str_for_unsupported() -> None:
             return "weird"
 
     assert runner._serialize_datetime(WeirdValue()) == "weird"
+
+
+def test_duration_seconds_handles_datetimes() -> None:
+    start = datetime(2026, 1, 1, 12, 0, 0)
+    end = datetime(2026, 1, 1, 12, 0, 1, 250000)
+
+    assert runner._duration_seconds(start, end) == 1.25
+    assert runner._duration_seconds(end, start) is None
+    assert runner._duration_seconds(None, end) is None
 
 
 # --- _coerce_logical_date -------------------------------------------------
@@ -176,6 +187,20 @@ def test_task_state_buckets_splits_failed_and_unfinished() -> None:
 
     assert {task.task_id for task in failed} == {"b", "c", "e"}
     assert {task.task_id for task in unfinished} == {"d"}
+
+
+def test_extract_task_runs_records_duration() -> None:
+    start = datetime(2026, 1, 1, 12, 0, 0)
+    end = datetime(2026, 1, 1, 12, 0, 2)
+    dagrun = FakeDagrun([FakeTI(task_id="a", state="success", start_date=start, end_date=end)])
+    dag = FakeDag(task_dict={"a": FakeTask("a")})
+
+    tasks = runner._extract_task_runs(dagrun, dag)
+
+    assert len(tasks) == 1
+    assert tasks[0].start_date == "2026-01-01T12:00:00"
+    assert tasks[0].end_date == "2026-01-01T12:00:02"
+    assert tasks[0].duration_seconds == 2.0
 
 
 # --- _task_instance_label -------------------------------------------------

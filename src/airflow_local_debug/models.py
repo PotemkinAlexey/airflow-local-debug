@@ -39,6 +39,7 @@ class TaskRunInfo:
     map_index: int | None = None
     start_date: str | None = None
     end_date: str | None = None
+    duration_seconds: float | None = None
 
 
 @dataclass

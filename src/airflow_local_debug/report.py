@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -8,6 +9,37 @@ from typing import Literal
 from airflow_local_debug.models import RunResult
 
 RunArtifactName = Literal["result", "report", "exception", "graph"]
+
+
+def _format_duration(seconds: float | int | None) -> str | None:
+    if seconds is None:
+        return None
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    if value < 1:
+        return f"{round(value * 1000):.0f}ms"
+    if value < 60:
+        if value.is_integer():
+            return f"{value:.0f}s"
+        return f"{value:.2f}s"
+
+    total_seconds = int(round(value))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    return f"{minutes}m {seconds}s"
+
+
+def _task_state_summary(result: RunResult) -> str | None:
+    if not result.tasks:
+        return None
+    counts = Counter(task.state or "unknown" for task in result.tasks)
+    return ", ".join(f"{state}={counts[state]}" for state in sorted(counts))
 
 
 def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
@@ -37,12 +69,17 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
             lines.append(f"- {note}")
 
     if result.tasks:
+        state_summary = _task_state_summary(result)
+        if state_summary:
+            lines.append(f"Task summary: {state_summary}")
         lines.append("Tasks:")
         for task in result.tasks:
             map_suffix = ""
             if task.map_index is not None and task.map_index >= 0:
                 map_suffix = f"[{task.map_index}]"
-            lines.append(f"- {task.task_id}{map_suffix}: {task.state or 'unknown'}")
+            duration = _format_duration(task.duration_seconds)
+            duration_suffix = f" ({duration})" if duration else ""
+            lines.append(f"- {task.task_id}{map_suffix}: {task.state or 'unknown'}{duration_suffix}")
 
     if result.exception and not result.exception_was_logged:
         lines.append("Exception:")

@@ -171,6 +171,9 @@ class RunResult:
     def ok(self) -> bool: ...      # True only when state == "success" and no exception
 ```
 
+Each `TaskRunInfo` also includes `start_date`, `end_date`, and
+`duration_seconds` when Airflow exposes timing data for the task instance.
+
 For a persisted snapshot from the convenience CLI/API, pass
 `--report-dir ./airflow-debug-report` or `report_dir="..."`.
 

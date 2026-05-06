@@ -76,6 +76,18 @@ def _serialize_datetime(value: Any) -> str | None:
     return str(value)
 
 
+def _duration_seconds(start: Any, end: Any) -> float | None:
+    if start is None or end is None:
+        return None
+    try:
+        seconds = (end - start).total_seconds()
+    except Exception:
+        return None
+    if seconds < 0:
+        return None
+    return round(float(seconds), 6)
+
+
 def _coerce_logical_date(value: str | date | datetime | None) -> datetime | None:
     def ensure_aware(value: datetime) -> datetime:
         if value.tzinfo is not None and value.utcoffset() is not None:
@@ -143,14 +155,17 @@ def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
 
     task_runs: list[TaskRunInfo] = []
     for ti in dagrun.get_task_instances():
+        start_date = getattr(ti, "start_date", None)
+        end_date = getattr(ti, "end_date", None)
         task_runs.append(
             TaskRunInfo(
                 task_id=getattr(ti, "task_id", "<unknown>"),
                 state=normalize_state(getattr(ti, "state", None)),
                 try_number=getattr(ti, "try_number", None),
                 map_index=getattr(ti, "map_index", None),
-                start_date=_serialize_datetime(getattr(ti, "start_date", None)),
-                end_date=_serialize_datetime(getattr(ti, "end_date", None)),
+                start_date=_serialize_datetime(start_date),
+                end_date=_serialize_datetime(end_date),
+                duration_seconds=_duration_seconds(start_date, end_date),
             )
         )
 
@@ -395,6 +410,7 @@ def _normalize_task_states_for_backend(
                         map_index=task.map_index,
                         start_date=task.start_date,
                         end_date=task.end_date,
+                        duration_seconds=task.duration_seconds,
                     )
                 )
             else:
@@ -406,6 +422,7 @@ def _normalize_task_states_for_backend(
                         map_index=task.map_index,
                         start_date=task.start_date,
                         end_date=task.end_date,
+                        duration_seconds=task.duration_seconds,
                     )
                 )
             continue
