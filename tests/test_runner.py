@@ -135,6 +135,24 @@ def test_load_cli_conf_rejects_invalid_payloads(tmp_path) -> None:
         runner._load_cli_conf(conf_json="{broken")
 
 
+# --- _load_cli_extra_env --------------------------------------------------
+
+
+def test_load_cli_extra_env_parses_key_value_pairs() -> None:
+    assert runner._load_cli_extra_env(["FOO=bar", "EMPTY=", "WITH_EQUALS=a=b"]) == {
+        "FOO": "bar",
+        "EMPTY": "",
+        "WITH_EQUALS": "a=b",
+    }
+
+
+def test_load_cli_extra_env_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="KEY=VALUE"):
+        runner._load_cli_extra_env(["NOPE"])
+    with pytest.raises(ValueError, match="KEY=VALUE"):
+        runner._load_cli_extra_env(["=value"])
+
+
 # --- _state_token / _task_state_buckets -----------------------------------
 
 
@@ -403,6 +421,25 @@ def test_debug_dag_cli_preserves_programmatic_conf(monkeypatch: pytest.MonkeyPat
     assert captured["conf"] == {"dataset": "daily"}
 
 
+def test_debug_dag_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=["--env", "FOO=bar", "--env", "BAZ=qux"],
+        extra_env={"FOO": "old", "KEEP": "yes"},
+    )
+
+    assert result.ok
+    assert captured["extra_env"] == {"FOO": "bar", "KEEP": "yes", "BAZ": "qux"}
+
+
 def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     captured: dict[str, Any] = {}
 
@@ -472,3 +509,20 @@ def test_debug_dag_file_cli_passes_conf_file(monkeypatch: pytest.MonkeyPatch, tm
 
     assert result.ok
     assert captured["conf"] == {"dataset": "hourly"}
+
+
+def test_debug_dag_file_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag_from_file(dag_file: str, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag_from_file", fake_debug_dag_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=["/tmp/demo_dag.py", "--env", "FOO=bar"],
+    )
+
+    assert result.ok
+    assert captured["extra_env"] == {"FOO": "bar"}

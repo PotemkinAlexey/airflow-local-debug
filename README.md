@@ -63,6 +63,7 @@ CLI flags (both entrypoints):
 | `--logical-date` | Logical date / execution date for the run |
 | `--conf-json` | JSON object to pass as `dag_run.conf` |
 | `--conf-file` | Path to a JSON object file to pass as `dag_run.conf` |
+| `--env` | Extra `KEY=VALUE` environment variable for this run; repeatable |
 | `--no-trace` | Disable live per-task console tracing |
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |

@@ -126,6 +126,17 @@ def _load_cli_conf(*, conf_json: str | None = None, conf_file: str | None = None
     return payload
 
 
+def _load_cli_extra_env(values: list[str] | None) -> dict[str, str]:
+    extra_env: dict[str, str] = {}
+    for value in values or []:
+        key, separator, raw = value.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            raise ValueError("--env values must use KEY=VALUE format.")
+        extra_env[key] = raw
+    return extra_env
+
+
 def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
     if dagrun is None or not hasattr(dagrun, "get_task_instances"):
         return []
@@ -1508,6 +1519,13 @@ def debug_dag_cli(
         help="Path to a JSON object file to pass as dag_run.conf.",
     )
     parser.add_argument(
+        "--env",
+        dest="env",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Extra environment variable for this local run; may be passed multiple times.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1541,17 +1559,25 @@ def debug_dag_cli(
         conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        cli_extra_env = _load_cli_extra_env(args.env)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if conf is None:
         conf = kwargs.pop("conf", None)
     else:
         kwargs.pop("conf", None)
+    programmatic_extra_env = kwargs.pop("extra_env", None)
+    extra_env = dict(programmatic_extra_env or {})
+    extra_env.update(cli_extra_env)
 
     return debug_dag(
         dag,
         config_path=args.config_path,
         logical_date=args.logical_date,
         conf=conf,
+        extra_env=extra_env or None,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
@@ -1599,6 +1625,13 @@ def debug_dag_file_cli(
         help="Path to a JSON object file to pass as dag_run.conf.",
     )
     parser.add_argument(
+        "--env",
+        dest="env",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Extra environment variable for this local run; may be passed multiple times.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1629,6 +1662,10 @@ def debug_dag_file_cli(
         conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        extra_env = _load_cli_extra_env(args.env)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     return debug_dag_from_file(
         args.dag_file,
@@ -1636,6 +1673,7 @@ def debug_dag_file_cli(
         config_path=args.config_path,
         logical_date=args.logical_date,
         conf=conf,
+        extra_env=extra_env or None,
         trace=not args.no_trace,
         fail_fast=not args.no_fail_fast,
         include_graph_in_report=args.include_graph_in_report,
