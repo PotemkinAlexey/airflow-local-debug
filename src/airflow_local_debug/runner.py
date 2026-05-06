@@ -39,7 +39,7 @@ from airflow_local_debug.config_loader import get_default_config_path, load_loca
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph
 from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.models import LocalConfig, RunResult, TaskRunInfo, normalize_state
+from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo, normalize_state
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -1357,13 +1357,56 @@ def _load_module_from_file(path: str) -> ModuleType:
     return module
 
 
-def _resolve_dag_from_module(module: ModuleType, dag_id: str | None = None) -> Any:
-    candidates = []
+def _dag_candidates_from_module(module: ModuleType) -> list[Any]:
+    candidates: list[Any] = []
+    seen: set[int] = set()
     for value in module.__dict__.values():
         if isinstance(value, type):
             continue
         if hasattr(value, "dag_id") and hasattr(value, "task_dict"):
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
             candidates.append(value)
+    candidates.sort(key=lambda dag: str(getattr(dag, "dag_id", "<unknown>")))
+    return candidates
+
+
+def _dag_file_info(dag: Any) -> DagFileInfo:
+    task_dict = getattr(dag, "task_dict", None)
+    tasks = getattr(dag, "tasks", None)
+    if task_dict:
+        task_count = len(task_dict)
+    elif tasks:
+        task_count = len(tasks)
+    else:
+        task_count = 0
+    fileloc = getattr(dag, "fileloc", None)
+    return DagFileInfo(
+        dag_id=str(getattr(dag, "dag_id", "<unknown>")),
+        task_count=task_count,
+        fileloc=str(fileloc) if fileloc else None,
+    )
+
+
+def format_dag_list(infos: Iterable[DagFileInfo], *, source_path: str | None = None) -> str:
+    rows = list(infos)
+    heading = "DAGs"
+    if source_path:
+        heading += f" in {Path(source_path).expanduser().resolve()}"
+    lines = [heading]
+    if not rows:
+        lines.append("<none>")
+        return "\n".join(lines)
+
+    for info in rows:
+        task_label = "task" if info.task_count == 1 else "tasks"
+        lines.append(f"- {info.dag_id} ({info.task_count} {task_label})")
+    return "\n".join(lines)
+
+
+def _resolve_dag_from_module(module: ModuleType, dag_id: str | None = None) -> Any:
+    candidates = _dag_candidates_from_module(module)
 
     if dag_id:
         for dag in candidates:
@@ -1379,6 +1422,18 @@ def _resolve_dag_from_module(module: ModuleType, dag_id: str | None = None) -> A
 
     dag_ids = ", ".join(sorted(getattr(dag, "dag_id", "<unknown>") for dag in candidates))
     raise ValueError(f"Multiple DAG objects found in module {module.__name__}: {dag_ids}. Pass dag_id explicitly.")
+
+
+def list_dags_from_file(
+    dag_file: str,
+    *,
+    config_path: str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> list[DagFileInfo]:
+    selected_config_path = config_path if config_path is not None else get_default_config_path(required=False)
+    with bootstrap_airflow_env(config_path=selected_config_path, extra_env=extra_env):
+        module = _load_module_from_file(dag_file)
+        return [_dag_file_info(dag) for dag in _dag_candidates_from_module(module)]
 
 
 def run_full_dag(
@@ -1605,6 +1660,11 @@ def debug_dag_file_cli(
         help="Optional DAG id when the file defines multiple DAGs.",
     )
     parser.add_argument(
+        "--list-dags",
+        action="store_true",
+        help="List DAG ids discovered in the file and exit without running a DAG.",
+    )
+    parser.add_argument(
         "--config-path",
         dest="config_path",
         help="Path to local Airflow debug config (connections, variables, pools).",
@@ -1659,11 +1719,29 @@ def debug_dag_file_cli(
     args = parser.parse_args(argv)
 
     try:
-        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
+        extra_env = _load_cli_extra_env(args.env)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.list_dags:
+        try:
+            infos = list_dags_from_file(
+                args.dag_file,
+                config_path=args.config_path,
+                extra_env=extra_env or None,
+            )
+        except Exception as exc:
+            parser.error(str(exc))
+        print(format_dag_list(infos, source_path=args.dag_file))
+        return RunResult(
+            dag_id="<list-dags>",
+            state="success",
+            config_path=args.config_path,
+            notes=[f"Listed {len(infos)} DAG(s) from {args.dag_file}."],
+        )
+
     try:
-        extra_env = _load_cli_extra_env(args.env)
+        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
 

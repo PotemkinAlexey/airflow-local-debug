@@ -55,6 +55,12 @@ airflow-debug-run /absolute/path/to/my_dag.py \
   --config-path /absolute/path/to/airflow_defaults.py
 ```
 
+Inspect DAGs in a file without running them:
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py --list-dags
+```
+
 CLI flags (both entrypoints):
 
 | Flag | Meaning |
@@ -69,6 +75,13 @@ CLI flags (both entrypoints):
 | `--include-graph-in-report` | Include the DAG graph in the final report |
 | `--report-dir` | Write `report.md`, `result.json`, `graph.svg`, and optional `graph.txt` / `exception.txt` |
 | `--graph-svg-path` | Write the rendered DAG graph SVG (defaults to `graph.svg` inside `--report-dir`) |
+
+File-based runner only:
+
+| Flag | Meaning |
+|---|---|
+| `--dag-id` | Select one DAG when the file defines multiple DAGs |
+| `--list-dags` | Print discovered DAG ids and task counts, then exit without running |
 
 ## Doctor
 

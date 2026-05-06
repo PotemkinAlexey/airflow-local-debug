@@ -7,6 +7,7 @@ Entrypoints
 - `debug_dag_from_file(path, ...)` — same, but loads the DAG from a file
 - `debug_dag_cli(dag)` — argparse wrapper for `python my_dag.py ...`
 - `debug_dag_file_cli()` — argparse wrapper for the `airflow-debug-run` script
+- `list_dags_from_file(path, ...)` — inspect DAG ids without running them
 - `run_doctor(...)` — validate local Airflow/debug prerequisites
 - `run_full_dag(dag, ...)` / `run_full_dag_from_file(...)` — return raw `RunResult`
 
@@ -69,7 +70,7 @@ from airflow_local_debug.config_loader import get_default_config_path, load_loca
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
 from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.models import LocalConfig, RunResult, TaskRunInfo
+from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -84,6 +85,8 @@ from airflow_local_debug.runner import (
     debug_dag_cli,
     debug_dag_file_cli,
     debug_dag_from_file,
+    format_dag_list,
+    list_dags_from_file,
     run_full_dag,
     run_full_dag_from_file,
 )
@@ -120,6 +123,7 @@ __all__ = [
     "debug_dag_file_cli",
     "debug_dag_from_file",
     "DebugPluginManager",
+    "DagFileInfo",
     "DoctorCheck",
     "DoctorResult",
     "ensure_quiet_airflow_bootstrap",
@@ -128,12 +132,14 @@ __all__ = [
     "check_local_config",
     "check_metadata_db",
     "format_dag_graph",
+    "format_dag_list",
     "format_doctor_report",
     "format_pretty_exception",
     "format_run_report",
     "get_airflow_version",
     "get_default_config_path",
     "live_task_trace",
+    "list_dags_from_file",
     "load_local_config",
     "LocalConfig",
     "print_dag_graph",

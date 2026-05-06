@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from types import ModuleType
 from typing import Any
 
 import pytest
 
 from airflow_local_debug import runner
-from airflow_local_debug.models import RunResult, TaskRunInfo
+from airflow_local_debug.models import DagFileInfo, RunResult, TaskRunInfo
 
 
 # --- helpers --------------------------------------------------------------
@@ -340,6 +341,41 @@ def test_attach_graph_svg_writes_path(tmp_path) -> None:
     assert output_path.read_text(encoding="utf-8").startswith("<svg")
 
 
+# --- DAG file listing -----------------------------------------------------
+
+
+def test_dag_candidates_from_module_deduplicates_and_sorts() -> None:
+    module = ModuleType("fake_dags")
+    first = FakeDag(task_dict={}, dag_id="first")
+    second = FakeDag(task_dict={}, dag_id="second")
+    module.second = second
+    module.first = first
+    module.alias = first
+    module.not_a_dag = object()
+
+    candidates = runner._dag_candidates_from_module(module)
+
+    assert candidates == [first, second]
+
+
+def test_format_dag_list_renders_task_counts(tmp_path) -> None:
+    rendered = runner.format_dag_list(
+        [
+            DagFileInfo(dag_id="daily", task_count=1),
+            DagFileInfo(dag_id="hourly", task_count=3),
+        ],
+        source_path=str(tmp_path / "dags.py"),
+    )
+
+    assert "DAGs in" in rendered
+    assert "- daily (1 task)" in rendered
+    assert "- hourly (3 tasks)" in rendered
+
+
+def test_format_dag_list_handles_empty() -> None:
+    assert runner.format_dag_list([]) == "DAGs\n<none>"
+
+
 # --- CLI argument plumbing ------------------------------------------------
 
 
@@ -490,6 +526,30 @@ def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, t
     assert captured["dag_file"] == "/tmp/demo_dag.py"
     assert captured["report_dir"] == str(tmp_path)
     assert captured["graph_svg_path"] is None
+
+
+def test_debug_dag_file_cli_lists_dags(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_list_dags_from_file(dag_file: str, **kwargs: Any) -> list[DagFileInfo]:
+        captured["dag_file"] = dag_file
+        captured.update(kwargs)
+        return [DagFileInfo(dag_id="daily", task_count=2)]
+
+    monkeypatch.setattr(runner, "list_dags_from_file", fake_list_dags_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=["/tmp/demo_dag.py", "--list-dags", "--env", "FOO=bar"],
+    )
+
+    assert result.ok
+    assert result.dag_id == "<list-dags>"
+    assert captured == {
+        "dag_file": "/tmp/demo_dag.py",
+        "config_path": None,
+        "extra_env": {"FOO": "bar"},
+    }
+    assert "- daily (2 tasks)" in capsys.readouterr().out
 
 
 def test_debug_dag_file_cli_passes_conf_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

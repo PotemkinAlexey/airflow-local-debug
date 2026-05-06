@@ -42,6 +42,13 @@ class TaskRunInfo:
 
 
 @dataclass
+class DagFileInfo:
+    dag_id: str
+    task_count: int
+    fileloc: str | None = None
+
+
+@dataclass
 class RunResult:
     dag_id: str
     run_id: str | None = None
