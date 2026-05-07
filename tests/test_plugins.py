@@ -65,30 +65,52 @@ def test_problem_log_plugin_restores_add_handler_after_run() -> None:
     assert logging.Logger.addHandler is original  # restored
 
 
-def test_problem_log_plugin_restores_add_handler_even_when_post_restore_step_raises() -> None:
+def test_problem_log_plugin_full_cleanup_runs_even_when_pretty_handler_close_raises() -> None:
+    """P2 regression: every cleanup step must complete even if one raises.
+
+    Previously, a failure inside `_pretty_handler.close()` would skip the
+    suppress-filter removal, the logger-list reset, and the
+    `_HAS_PRIMARY_TASK_ERROR` token reset. All four must complete now.
+    """
     import logging
 
-    from airflow_local_debug.plugins import ProblemLogPlugin
+    from airflow_local_debug.plugins import _HAS_PRIMARY_TASK_ERROR, ProblemLogPlugin
 
     original = logging.Logger.addHandler
     plugin = ProblemLogPlugin()
     plugin.before_run(dag=None, context={})
 
-    # Force a step AFTER the addHandler restore to raise; the addHandler
-    # patch must already be undone before this failure surfaces.
     assert plugin._pretty_handler is not None
+    assert plugin._suppress_filter is not None
+    assert plugin._attached_loggers  # something was attached
+    assert plugin._failure_token is not None
 
+    # Snapshot the handlers that got the suppress filter so we can verify
+    # they are clean afterwards.
+    filtered_pairs = list(plugin._filtered_handlers)
+
+    # Force the pretty handler's close() to raise.
     def boom_close() -> None:
-        raise RuntimeError("forced cleanup failure")
+        raise RuntimeError("forced close failure")
 
     plugin._pretty_handler.close = boom_close  # type: ignore[method-assign]
 
-    try:
-        plugin.after_run(dag=None, context={}, result=None)
-    except RuntimeError:
-        pass
+    plugin.after_run(dag=None, context={}, result=None)  # must not raise
 
+    # 1. addHandler patch undone.
     assert logging.Logger.addHandler is original
+    # 2. pretty handler reference cleared.
+    assert plugin._pretty_handler is None
+    # 3. suppress filters removed from every handler we touched.
+    for handler, suppress_filter in filtered_pairs:
+        assert suppress_filter not in getattr(handler, "filters", ())
+    # 4. internal lists reset.
+    assert plugin._attached_loggers == []
+    assert plugin._filtered_handlers == []
+    assert plugin._suppress_filter is None
+    # 5. context-var token reset (i.e. no longer signalling primary error).
+    assert plugin._failure_token is None
+    assert _HAS_PRIMARY_TASK_ERROR.get() is False
 
 
 # --- helpers --------------------------------------------------------------

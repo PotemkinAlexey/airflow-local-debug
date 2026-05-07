@@ -284,3 +284,85 @@ def test_debug_dag_file_cli_dispatches_to_watch(monkeypatch: pytest.MonkeyPatch,
     assert captured["dag_file"] == str(dag_file)
     assert captured["kwargs"]["poll_interval"] == 1.5
     assert captured["kwargs"]["watch_paths"] == [str(tmp_path / "sql")]
+
+
+def test_watch_dag_file_writes_artifacts_each_iteration(tmp_path: Path) -> None:
+    """P1 regression: --report-dir / --xcom-json-path must produce files in watch mode."""
+    dag_file = tmp_path / "demo.py"
+    dag_file.write_text("# placeholder")
+
+    def fake_runner(path: str, *, dag_id: str | None = None, **kwargs: Any) -> RunResult:
+        return RunResult(
+            dag_id="demo",
+            state="success",
+            tasks=[TaskRunInfo(task_id="only", state="success")],
+            xcoms={"only": {"return_value": 42}},
+        )
+
+    iteration_state = {"count": 0}
+
+    def fake_sleep(seconds: float) -> None:
+        iteration_state["count"] += 1
+        if iteration_state["count"] >= 1:
+            import os
+
+            stat = dag_file.stat()
+            os.utime(dag_file, (stat.st_atime, stat.st_mtime + 100))
+
+    report_dir = tmp_path / "report"
+    xcom_path = tmp_path / "xcoms.json"
+    stream = io.StringIO()
+
+    watch.watch_dag_file(
+        str(dag_file),
+        runner=fake_runner,
+        reporter=lambda r: None,
+        stream=stream,
+        sleep=fake_sleep,
+        max_iterations=2,
+        report_dir=report_dir,
+        xcom_json_path=str(xcom_path),
+    )
+
+    assert (report_dir / "result.json").exists()
+    assert (report_dir / "report.md").exists()
+    assert xcom_path.exists()
+
+
+def test_debug_dag_file_cli_forwards_artifact_flags_to_watch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P1 regression: --report-dir et al. must reach watch_dag_file, not be silently dropped."""
+    dag_file = tmp_path / "demo.py"
+    dag_file.write_text("# placeholder")
+
+    captured: dict[str, Any] = {}
+
+    def fake_watch(file_path: str, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    import airflow_local_debug.watch as watch_module
+
+    monkeypatch.setattr(watch_module, "watch_dag_file", fake_watch)
+
+    from airflow_local_debug.runner import debug_dag_file_cli
+
+    debug_dag_file_cli(
+        argv=[
+            str(dag_file),
+            "--watch",
+            "--report-dir",
+            str(tmp_path / "report"),
+            "--xcom-json-path",
+            str(tmp_path / "xc.json"),
+            "--graph-svg-path",
+            str(tmp_path / "g.svg"),
+            "--include-graph-in-report",
+        ]
+    )
+
+    assert captured["report_dir"] == str(tmp_path / "report")
+    assert captured["xcom_json_path"] == str(tmp_path / "xc.json")
+    assert captured["graph_svg_path"] == str(tmp_path / "g.svg")
+    assert captured["include_graph_in_report"] is True

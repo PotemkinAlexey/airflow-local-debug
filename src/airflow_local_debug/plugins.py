@@ -408,10 +408,10 @@ class ProblemLogPlugin(AirflowDebugPlugin):
         self._patch_add_handler()
 
     def after_run(self, dag: Any, context: Mapping[str, Any], result: Any) -> None:
-        # The class-level addHandler patch is the most dangerous bit of state
-        # in this plugin: if it survives the run, every other logger created
-        # later in this process inherits the patched method. Restore it first
-        # and inside try/finally so a later cleanup error cannot leak it.
+        # Every cleanup step is independent: a failure in one must not leave
+        # later steps un-run. The most dangerous step (the class-level
+        # addHandler patch) is undone first so even an early surprise cannot
+        # leak it across the rest of the process.
         try:
             if self._original_add_handler is not None:
                 logging.Logger.addHandler = self._original_add_handler
@@ -419,26 +419,35 @@ class ProblemLogPlugin(AirflowDebugPlugin):
             self._original_add_handler = None
             self._unregister_atexit_cleanup()
 
-        if self._pretty_handler is not None:
-            for logger in self._attached_loggers:
+        try:
+            if self._pretty_handler is not None:
+                for logger in self._attached_loggers:
+                    try:
+                        logger.removeHandler(self._pretty_handler)
+                    except Exception:
+                        continue
                 try:
-                    logger.removeHandler(self._pretty_handler)
+                    self._pretty_handler.close()
+                except Exception as exc:
+                    log.debug("ProblemLogPlugin: pretty handler close failed: %s", exc, exc_info=True)
+        finally:
+            self._pretty_handler = None
+
+        try:
+            for handler, suppress_filter in self._filtered_handlers:
+                try:
+                    handler.removeFilter(suppress_filter)
                 except Exception:
                     continue
-            self._pretty_handler.close()
+        finally:
+            self._attached_loggers.clear()
+            self._filtered_handlers.clear()
+            self._suppress_filter = None
 
-        for handler, suppress_filter in self._filtered_handlers:
-            try:
-                handler.removeFilter(suppress_filter)
-            except Exception:
-                continue
-
-        self._pretty_handler = None
-        self._attached_loggers.clear()
-        self._filtered_handlers.clear()
-        self._suppress_filter = None
-        if self._failure_token is not None:
-            _HAS_PRIMARY_TASK_ERROR.reset(self._failure_token)
+        try:
+            if self._failure_token is not None:
+                _HAS_PRIMARY_TASK_ERROR.reset(self._failure_token)
+        finally:
             self._failure_token = None
 
     def _atexit_restore(self) -> None:

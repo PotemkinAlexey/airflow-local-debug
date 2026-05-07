@@ -178,6 +178,10 @@ def watch_dag_file(
     dag_id: str | None = None,
     watch_paths: Iterable[str] | None = None,
     poll_interval: float = 0.5,
+    report_dir: str | Path | None = None,
+    include_graph_in_report: bool = False,
+    xcom_json_path: str | Path | None = None,
+    graph_svg_path: str | Path | None = None,
     runner: Any = None,
     reporter: Any = None,
     stream: IO[str] | None = None,
@@ -187,9 +191,15 @@ def watch_dag_file(
 ) -> RunResult:
     """Run the DAG file in a hot-reload loop until the user interrupts.
 
-    Returns the most recent `RunResult`. The optional `runner`, `reporter`,
-    `sleep`, and `max_iterations` arguments exist primarily so tests can
-    drive the loop deterministically without real I/O.
+    Returns the most recent `RunResult`. After every iteration, the same
+    artefact flags as `debug_dag_from_file` are honoured: `report_dir` writes
+    `result.json` / `report.md` / `tasks.csv` etc., `xcom_json_path` writes a
+    standalone XCom snapshot, `graph_svg_path` writes an explicit SVG path
+    (defaults to `report_dir/graph.svg` when only `report_dir` is set).
+
+    The optional `runner`, `reporter`, `sleep`, and `max_iterations`
+    arguments exist primarily so tests can drive the loop deterministically
+    without real I/O.
     """
     if poll_interval <= 0:
         raise ValueError("poll_interval must be positive.")
@@ -200,6 +210,15 @@ def watch_dag_file(
         from airflow_local_debug.reporting.report import print_run_report as reporter
     if sleep is None:
         sleep = time.sleep
+
+    from airflow_local_debug.execution.orchestrator import resolve_graph_svg_path, write_report_artifacts
+    from airflow_local_debug.reporting.report import write_xcom_snapshot
+
+    resolved_graph_svg_path = resolve_graph_svg_path(report_dir=report_dir, graph_svg_path=graph_svg_path)
+    if resolved_graph_svg_path is not None:
+        runner_kwargs.setdefault("graph_svg_path", resolved_graph_svg_path)
+    if report_dir is not None or xcom_json_path is not None:
+        runner_kwargs["collect_xcoms"] = True
 
     output = stream or sys.stdout
     roots = resolve_watch_roots(dag_file, list(watch_paths or []))
@@ -236,6 +255,12 @@ def watch_dag_file(
         # do not blow away unrelated lazy-imported third-party modules between
         # iterations.
         dag_loaded_modules = _modules_under_watch_roots(set(sys.modules) - modules_before, roots)
+
+        if xcom_json_path is not None:
+            xcom_path = write_xcom_snapshot(result, xcom_json_path)
+            result.notes.append(f"Wrote XCom snapshot to {xcom_path}")
+        if report_dir is not None:
+            write_report_artifacts(result, report_dir, include_graph=include_graph_in_report)
 
         reporter(result)
         last_result = result
