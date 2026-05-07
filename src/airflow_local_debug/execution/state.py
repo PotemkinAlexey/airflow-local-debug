@@ -49,6 +49,31 @@ def trace_context_for_ti(ti: Any) -> dict[str, Any]:
     }
 
 
+def serialize_datetime(value: Any) -> str | None:
+    """Render a datetime-ish value as an ISO string, falling back to str()."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        try:
+            return str(value.isoformat())
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def duration_seconds(start: Any, end: Any) -> float | None:
+    """Compute (end - start).total_seconds() defensively."""
+    if start is None or end is None:
+        return None
+    try:
+        seconds = (end - start).total_seconds()
+    except Exception:
+        return None
+    if seconds < 0:
+        return None
+    return round(float(seconds), 6)
+
+
 def best_effort_task_result(ti: Any) -> Any:
     """Pull this TI's `return_value` XCom; tolerate API variants."""
     map_index = getattr(ti, "map_index", None)
