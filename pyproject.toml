@@ -65,6 +65,7 @@ warn_unused_ignores = false
 [[tool.mypy.overrides]]
 module = [
   "airflow_local_debug.doctor",
+  "airflow_local_debug.execution",
   "airflow_local_debug.live_trace",
   "airflow_local_debug.runner",
 ]
