@@ -41,6 +41,12 @@ jobs:
       - name: Run tests
         run: python -m pytest -q tests
 
+      - name: Run lint and type checks
+        if: matrix.airflow-version == '3.2.1'
+        run: |
+          python -m ruff check src tests
+          python -m mypy
+
       - name: Initialize Airflow DB
         env:
           AIRFLOW_HOME: ${{ runner.temp }}/airflow-home

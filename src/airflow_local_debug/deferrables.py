@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, Mapping
+from typing import Any
 
 from airflow_local_debug.models import DeferrableTaskInfo
 
@@ -58,7 +59,7 @@ def _operator_label(task: Any) -> str:
     task_type = getattr(task, "task_type", None)
     if task_type:
         return str(task_type)
-    return task.__class__.__name__
+    return str(task.__class__.__name__)
 
 
 def _trigger_label(task: Any) -> str | None:

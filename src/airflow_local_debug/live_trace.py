@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from types import MethodType
+from types import MethodType, TracebackType
 from typing import Any
 
 from airflow_local_debug.plugins import (
@@ -20,7 +20,7 @@ _CALLBACK_ATTRS = (
 )
 
 
-class LiveTaskTraceSession(AbstractContextManager):
+class LiveTaskTraceSession(AbstractContextManager["LiveTaskTraceSession"]):
     def __init__(
         self,
         dag: Any,
@@ -35,14 +35,19 @@ class LiveTaskTraceSession(AbstractContextManager):
         self._started: set[tuple[str, str | None, int | None]] = set()
         self._results: dict[tuple[str, str | None, int | None], Any] = {}
 
-    def __enter__(self) -> "LiveTaskTraceSession":
+    def __enter__(self) -> LiveTaskTraceSession:
         if not self.wrap_task_methods:
             return self
         for task in list(getattr(self.dag, "task_dict", {}).values()):
             self._wrap_task(task)
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if not self.wrap_task_methods:
             self._started.clear()
             self._results.clear()

@@ -23,8 +23,9 @@ from __future__ import annotations
 import contextvars
 import logging
 import sys
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from airflow_local_debug.traceback_utils import (
     StepTracer,
@@ -110,7 +111,7 @@ def _trace_key(task: Any, context: Mapping[str, Any]) -> tuple[str, str | None, 
 
 
 @contextmanager
-def task_label_scope(task: Any, context: Mapping[str, Any]):
+def task_label_scope(task: Any, context: Mapping[str, Any]) -> Iterator[None]:
     token = _CURRENT_TASK_LABEL.set(_display_task_id(task, context))
     try:
         yield
@@ -327,7 +328,7 @@ class ConsoleTracePlugin(AirflowDebugPlugin):
         key = _trace_key(task, context)
         _mark_primary_task_error(error)
         try:
-            setattr(error, "_airflow_debug_live_logged", True)
+            error._airflow_debug_live_logged = True
         except Exception:
             pass
         tracer = self._active.pop(key, None)
@@ -466,7 +467,7 @@ class ProblemLogPlugin(AirflowDebugPlugin):
 def _mark_primary_task_error(error: BaseException) -> None:
     _HAS_PRIMARY_TASK_ERROR.set(True)
     try:
-        setattr(error, "_airflow_debug_primary_error", True)
+        error._airflow_debug_primary_error = True
     except Exception:
         pass
 
@@ -503,7 +504,7 @@ def _maybe_mark_primary_problem_record(record: logging.LogRecord) -> None:
         _HAS_PRIMARY_TASK_ERROR.set(True)
         if isinstance(exc, BaseException):
             try:
-                setattr(exc, "_airflow_debug_primary_error", True)
+                exc._airflow_debug_primary_error = True
             except Exception:
                 pass
 

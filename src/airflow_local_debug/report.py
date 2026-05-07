@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections import Counter
 import csv
-from dataclasses import asdict
 import json
+from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree

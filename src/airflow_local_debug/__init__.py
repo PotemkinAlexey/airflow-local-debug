@@ -59,6 +59,7 @@ Library usage (no global state mutation)
 """
 
 from importlib import import_module
+from typing import Any
 
 from airflow_local_debug.bootstrap import (
     ensure_quiet_airflow_bootstrap,
@@ -72,7 +73,7 @@ from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
 from airflow_local_debug.live_trace import live_task_trace
 from airflow_local_debug.mocks import TaskMockRule, load_task_mock_rules, task_mock_rules_from_payload
-from airflow_local_debug.models import DeferrableTaskInfo, DagFileInfo, LocalConfig, RunResult, TaskMockInfo, TaskRunInfo
+from airflow_local_debug.models import DagFileInfo, DeferrableTaskInfo, LocalConfig, RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -109,7 +110,7 @@ _DOCTOR_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name in _DOCTOR_EXPORTS:
         module = import_module("airflow_local_debug.doctor")
         value = getattr(module, name)

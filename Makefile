@@ -1,9 +1,15 @@
 PYTHON ?= python
 
-.PHONY: install-dev test build check smoke clean
+.PHONY: install-dev lint typecheck test build check smoke clean
 
 install-dev:
 	$(PYTHON) -m pip install -e .[dev]
+
+lint:
+	$(PYTHON) -m ruff check src tests
+
+typecheck:
+	$(PYTHON) -m mypy
 
 test:
 	$(PYTHON) -m pytest -q tests
@@ -11,7 +17,7 @@ test:
 build:
 	$(PYTHON) -m build
 
-check: test build
+check: lint typecheck test build
 
 smoke:
 	tmp_dir=$$(mktemp -d); \
@@ -20,5 +26,5 @@ smoke:
 	AIRFLOW_HOME=$$tmp_dir AIRFLOW__CORE__LOAD_EXAMPLES=False $(PYTHON) tests/smoke_airflow_runtime.py
 
 clean:
-	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .mypy_cache
+	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

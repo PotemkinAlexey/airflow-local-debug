@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
 
 import airflow
 

@@ -11,8 +11,9 @@ from __future__ import annotations
 import os
 import sys
 import warnings
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any
 
 _QUIET_READY_ENV = "AIRFLOW_DEBUG_BOOTSTRAP_QUIET_READY"
 
@@ -31,10 +32,17 @@ def silence_airflow_bootstrap_warnings() -> None:
 
     original_showwarning = warnings.showwarning
 
-    def quiet_showwarning(message, category, filename, lineno, file=None, line=None):
+    def quiet_showwarning(
+        message: Warning | str,
+        category: type[Warning],
+        filename: str,
+        lineno: int,
+        file: Any = None,
+        line: str | None = None,
+    ) -> None:
         if issubclass(category, (DeprecationWarning, FutureWarning)):
             return
-        return original_showwarning(message, category, filename, lineno, file=file, line=line)
+        original_showwarning(message, category, filename, lineno, file=file, line=line)
 
     warnings.showwarning = quiet_showwarning
     warnings.simplefilter("ignore", DeprecationWarning)
@@ -55,10 +63,17 @@ def silenced_airflow_bootstrap_warnings() -> Iterator[None]:
         warnings.simplefilter("ignore", DeprecationWarning)
         warnings.simplefilter("ignore", FutureWarning)
 
-        def quiet_showwarning(message, category, filename, lineno, file=None, line=None):
+        def quiet_showwarning(
+            message: Warning | str,
+            category: type[Warning],
+            filename: str,
+            lineno: int,
+            file: Any = None,
+            line: str | None = None,
+        ) -> None:
             if issubclass(category, (DeprecationWarning, FutureWarning)):
                 return
-            return original_showwarning(message, category, filename, lineno, file=file, line=line)
+            original_showwarning(message, category, filename, lineno, file=file, line=line)
 
         warnings.showwarning = quiet_showwarning
         try:

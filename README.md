@@ -310,9 +310,11 @@ state and is intended for one-shot CLI use only.
 
 ```bash
 make install-dev
+make lint
+make typecheck
 make test
 make build
-make check   # tests + build
+make check   # lint + typecheck + tests + build
 make smoke   # Airflow runtime smoke in a temporary AIRFLOW_HOME
 ```
 

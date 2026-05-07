@@ -16,7 +16,6 @@ object and will decide yourself how to render it.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -24,10 +23,12 @@ import logging
 import sys
 import traceback
 import warnings
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Iterable
+from typing import Any
 
 from airflow_local_debug.compat import (
     build_dag_test_kwargs,
@@ -35,8 +36,8 @@ from airflow_local_debug.compat import (
     get_airflow_version,
     has_dag_test,
 )
-from airflow_local_debug.console import print_run_preamble
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
+from airflow_local_debug.console import print_run_preamble
 from airflow_local_debug.deferrables import detect_deferrable_tasks, format_deferrable_note
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph
@@ -73,7 +74,7 @@ def _serialize_datetime(value: Any) -> str | None:
         return None
     if hasattr(value, "isoformat"):
         try:
-            return value.isoformat()
+            return str(value.isoformat())
         except Exception:
             return str(value)
     return str(value)
@@ -666,8 +667,8 @@ def _add_logger_if_needed(ti: Any) -> None:
 
 def _set_local_task_exception(dagrun: Any, ti: Any, exc: BaseException) -> None:
     try:
-        setattr(dagrun, "_airflow_debug_local_exception", exc)
-        setattr(dagrun, "_airflow_debug_local_task_label", _task_instance_label(ti))
+        dagrun._airflow_debug_local_exception = exc
+        dagrun._airflow_debug_local_task_label = _task_instance_label(ti)
     except Exception:
         pass
 
@@ -685,7 +686,7 @@ def _is_failed_task_instance(ti: Any) -> bool:
 
 
 @contextmanager
-def _airflow3_serialization_fileloc(dag: Any):
+def _airflow3_serialization_fileloc(dag: Any) -> Iterator[None]:
     fileloc = getattr(dag, "fileloc", None)
     if fileloc and Path(str(fileloc)).exists():
         yield
@@ -694,12 +695,12 @@ def _airflow3_serialization_fileloc(dag: Any):
     fallback = str(Path(__file__).resolve())
     had_fileloc = hasattr(dag, "fileloc")
     try:
-        setattr(dag, "fileloc", fallback)
+        dag.fileloc = fallback
         yield
     finally:
         if had_fileloc:
             try:
-                setattr(dag, "fileloc", fileloc)
+                dag.fileloc = fileloc
             except Exception:
                 pass
         else:
@@ -715,9 +716,9 @@ def _ensure_airflow3_serialized_dag(dag: Any, *, session: Any) -> Any:
 
     try:
         from airflow.serialization.definitions.dag import SerializedDAG
-        from airflow.serialization.serialized_objects import DagSerialization, LazyDeserializedDAG
+        from airflow.serialization.serialized_objects import DagSerialization, LazyDeserializedDAG  # type: ignore[attr-defined]
     except ImportError:
-        from airflow.serialization.serialized_objects import LazyDeserializedDAG, SerializedDAG
+        from airflow.serialization.serialized_objects import LazyDeserializedDAG, SerializedDAG  # type: ignore[attr-defined]
 
         DagSerialization = SerializedDAG
 
@@ -727,7 +728,7 @@ def _ensure_airflow3_serialized_dag(dag: Any, *, session: Any) -> Any:
 
     with _airflow3_serialization_fileloc(dag):
         SerializedDAG.bulk_write_to_db(bundle_name, None, [dag], parse_duration=None, session=session)
-        SerializedDagModel.write_dag(
+        SerializedDagModel.write_dag(  # type: ignore[call-arg]
             LazyDeserializedDAG.from_dag(dag),
             bundle_name=bundle_name,
             bundle_version=None,
@@ -746,7 +747,7 @@ def _strict_dag_test_airflow2(
     trace_session: Any | None = None,
 ) -> Any:
     from airflow.models.dag import _get_or_create_dagrun, _run_task, _triggerer_is_healthy
-    from airflow.models.dagrun import DagRun, DagRunType
+    from airflow.models.dagrun import DagRun, DagRunType  # type: ignore[attr-defined]
     from airflow.utils import timezone
     from airflow.utils.session import create_session
     from airflow.utils.state import DagRunState, State, TaskInstanceState
@@ -872,7 +873,7 @@ def _strict_dag_test_airflow3_legacy(
     from airflow.utils import timezone
     from airflow.utils.session import create_session
     from airflow.utils.state import DagRunState, State, TaskInstanceState
-    from airflow.utils.types import DagRunTriggeredByType, DagRunType
+    from airflow.utils.types import DagRunTriggeredByType, DagRunType  # type: ignore[attr-defined]
 
     execution_date = execution_date or timezone.utcnow()
     dag.validate()
@@ -889,13 +890,13 @@ def _strict_dag_test_airflow3_legacy(
         run_after = logical_date or timezone.coerce_datetime(timezone.utcnow())
         data_interval = dag.timetable.infer_manual_data_interval(run_after=logical_date) if logical_date else None
         scheduler_dag = SerializedDAG.deserialize_dag(SerializedDAG.serialize_dag(dag))  # type: ignore[arg-type]
-        dr = _get_or_create_dagrun(
+        dr = _get_or_create_dagrun(  # type: ignore[call-arg]
             dag=scheduler_dag,
             start_date=logical_date or run_after,
             logical_date=logical_date,
             data_interval=data_interval,
             run_after=run_after,
-            run_id=DagRun.generate_run_id(
+            run_id=DagRun.generate_run_id(  # type: ignore[call-arg]
                 run_type=DagRunType.MANUAL,
                 logical_date=logical_date,
                 run_after=run_after,
@@ -1001,12 +1002,12 @@ def _strict_dag_test_airflow3_serialized(
     run_conf: dict[str, Any] | None,
     trace_session: Any | None = None,
 ) -> Any:
-    from airflow.models.dagrun import DagRun, get_or_create_dagrun
+    from airflow.models.dagrun import DagRun, get_or_create_dagrun  # type: ignore[attr-defined]
     from airflow.sdk import DagRunState, TaskInstanceState, timezone
     from airflow.sdk.definitions.dag import _run_task
     from airflow.utils.session import create_session
     from airflow.utils.state import State
-    from airflow.utils.types import DagRunTriggeredByType, DagRunType
+    from airflow.utils.types import DagRunTriggeredByType, DagRunType  # type: ignore[attr-defined]
 
     try:
         from airflow.serialization.definitions.dag import SerializedDAG
@@ -1046,7 +1047,7 @@ def _strict_dag_test_airflow3_serialized(
             logical_date=logical_date,
             data_interval=data_interval,
             run_after=run_after,
-            run_id=DagRun.generate_run_id(
+            run_id=DagRun.generate_run_id(  # type: ignore[call-arg]
                 run_type=DagRunType.MANUAL,
                 logical_date=logical_date,
                 run_after=run_after,
@@ -1167,7 +1168,7 @@ def _strict_dag_test(
 
     has_airflow3_serialized_runner = False
     try:
-        from airflow.models.dagrun import get_or_create_dagrun as _airflow3_get_or_create  # noqa: F401
+        from airflow.models.dagrun import get_or_create_dagrun as _airflow3_get_or_create  # type: ignore[attr-defined]  # noqa: F401
     except ImportError:
         pass
     else:
@@ -1246,7 +1247,7 @@ def _local_task_policy(
     *,
     fail_fast: bool,
     notes: list[str],
-):
+) -> Iterator[None]:
     if not fail_fast:
         yield
         return
@@ -1277,10 +1278,10 @@ def _local_task_policy(
         yield
     finally:
         for task in list(getattr(dag, "task_dict", {}).values()):
-            original = originals.get(id(task))
-            if not original:
+            saved_original = originals.get(id(task))
+            if not saved_original:
                 continue
-            for attr_name, value in original.items():
+            for attr_name, value in saved_original.items():
                 setattr(task, attr_name, value)
 
 
@@ -1365,7 +1366,7 @@ def _execute_full_dag(
     deferrable_note = format_deferrable_note(deferrables)
     if deferrable_note:
         notes.append(deferrable_note)
-    run_context = {
+    run_context: dict[str, Any] = {
         "config_path": config_path,
         "logical_date": _serialize_datetime(run_logical_date),
         "conf": dict(conf or {}),

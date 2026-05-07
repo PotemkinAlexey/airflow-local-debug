@@ -19,7 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "build>=1.2.1",
+  "mypy>=1.10",
   "pytest>=7.4",
+  "ruff>=0.6.0",
 ]
 
 [project.scripts]
@@ -38,3 +40,36 @@ airflow_local_debug = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 140
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["airflow_local_debug"]
+mypy_path = "src"
+strict = true
+ignore_missing_imports = true
+show_error_codes = true
+pretty = true
+warn_unreachable = true
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = [
+  "airflow_local_debug.doctor",
+  "airflow_local_debug.live_trace",
+  "airflow_local_debug.runner",
+]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = ["airflow_local_debug.plugins"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disable_error_code = ["assignment", "attr-defined", "method-assign"]

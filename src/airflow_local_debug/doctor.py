@@ -7,7 +7,7 @@ import sys
 import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from airflow_local_debug.bootstrap import ensure_quiet_airflow_bootstrap
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
@@ -209,9 +209,9 @@ def _airflow_major(version: str | None) -> int | None:
     return parsed[0] if parsed is not None else None
 
 
-def _serialize_dag_for_airflow3(dag) -> None:
+def _serialize_dag_for_airflow3(dag: Any) -> None:
     try:
-        from airflow.serialization.serialized_objects import DagSerialization
+        from airflow.serialization.serialized_objects import DagSerialization  # type: ignore[attr-defined]
     except ImportError:
         from airflow.serialization.serialized_objects import SerializedDAG as DagSerialization
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Iterator, Mapping
+from typing import Any
 
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
 from airflow_local_debug.models import LocalConfig

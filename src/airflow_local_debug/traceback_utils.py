@@ -18,9 +18,11 @@ import re
 import sys
 import time
 import traceback
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, TextIO, Union
+from types import TracebackType
+from typing import Any, TextIO
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 RESET = "\033[0m"
@@ -148,7 +150,7 @@ def _collect_error_context(exc: BaseException) -> dict[str, Any]:
                 elif isinstance(text_value, str):
                     body_text = _preview_text(text_value)
                 elif hasattr(response, "content"):
-                    content = getattr(response, "content") or b""
+                    content = response.content or b""
                     if isinstance(content, (bytes, bytearray)):
                         body_text = _preview_text(content.decode("utf-8", "replace"))
             except Exception:
@@ -372,7 +374,7 @@ def safe_repr(obj: Any, limit: int = 800) -> str:
     return text if len(text) <= limit else text[:limit] + "...<trimmed>"
 
 
-def shrink(obj: Any, limit: int = 800) -> Union[str, list[Any], dict[str, str]]:
+def shrink(obj: Any, limit: int = 800) -> str | list[Any] | dict[str, str]:
     """
     Compact pretty-printer for logging common payloads.
     - dict => {k: safe_repr(v, 200)} for up to 50 keys
@@ -535,9 +537,9 @@ class StepTracerOptions:
     enable_colors: bool = True
     inline_event_limit: int = 500
     show_meta: bool = True
-    start_icon: Optional[str] = None
-    finish_icon: Optional[str] = None
-    error_icon: Optional[str] = None
+    start_icon: str | None = None
+    finish_icon: str | None = None
+    error_icon: str | None = None
 
 
 class StepTracer:
@@ -555,9 +557,9 @@ class StepTracer:
         self,
         task_id: str,
         operator: str,
-        run_id: Optional[str],
-        map_index: Optional[int],
-        options: Optional[StepTracerOptions] = None,
+        run_id: str | None,
+        map_index: int | None,
+        options: StepTracerOptions | None = None,
     ) -> None:
         self.task_id = task_id
         self.operator = operator
@@ -575,13 +577,18 @@ class StepTracer:
             text = safe_repr(data, limit=self.opts.inline_event_limit)
         self._println(DOT, f"{_colorize(kind, CYAN, self.opts.enable_colors)}: {text}")
 
-    def __enter__(self) -> "StepTracer":
+    def __enter__(self) -> StepTracer:
         self._t0_ms = _now_ms()
         start_icon = self.opts.start_icon or START_DEFAULT
         self._println(start_icon, _colorize("start", YELLOW, self.opts.enable_colors))
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         duration = _fmt_dur(_now_ms() - self._t0_ms)
         if exc_type is not None and exc is not None:
             block = format_pretty_exception(

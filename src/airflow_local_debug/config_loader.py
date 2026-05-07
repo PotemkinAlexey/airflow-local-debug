@@ -5,11 +5,12 @@ import importlib.util
 import json
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from types import ModuleType
+from typing import Any
 
 from airflow_local_debug.models import LocalConfig
-
 
 _CONFIG_ENV_VARS = ("AIRFLOW_DEBUG_LOCAL_CONFIG", "RUNBOOK_LOCAL_CONFIG")
 
@@ -39,7 +40,7 @@ def get_default_config_path(*, required: bool = False) -> str | None:
     return None
 
 
-def _load_module_from_path(filepath: str):
+def _load_module_from_path(filepath: str) -> ModuleType:
     abs_path = str(Path(filepath).expanduser().resolve())
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Config file not found: {abs_path}")
@@ -55,7 +56,7 @@ def _load_module_from_path(filepath: str):
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        spec.loader.exec_module(module)
     except Exception:
         sys.modules.pop(module_name, None)
         raise

@@ -17,6 +17,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - Deferrable task detection via `detect_deferrable_tasks()`, `DeferrableTaskInfo`,
   `RunResult.deferrables`, and final report output that explains the local
   trigger handling mode.
+- Ruff and Mypy development checks, exposed through `make lint`,
+  `make typecheck`, `make check`, and CI.
 
 ### Changed
 - `RunResult` now includes `mocks` and `xcoms`.
@@ -24,6 +26,7 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - `TaskRunInfo` now includes `mocked`.
 - `tasks.csv` now includes a `mocked` column, and the console report marks
   mocked tasks explicitly.
+- `make check` now runs lint and type checks before tests and package build.
 
 ## [0.2.0] - 2026-05-07
 

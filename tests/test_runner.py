@@ -11,7 +11,6 @@ from airflow_local_debug import runner
 from airflow_local_debug.mocks import TaskMockRule
 from airflow_local_debug.models import DagFileInfo, RunResult, TaskRunInfo
 
-
 # --- helpers --------------------------------------------------------------
 
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import fnmatch
 import json
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MethodType
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any
 
 from airflow_local_debug.models import TaskMockInfo
 
@@ -156,7 +157,7 @@ def local_task_mocks(
 
         unmatched = [
             rule.describe()
-            for rule, count in zip(rule_list, matched_counts)
+            for rule, count in zip(rule_list, matched_counts, strict=True)
             if count == 0 and rule.required
         ]
         if unmatched:
@@ -171,7 +172,7 @@ def local_task_mocks(
             if original is _MISSING:
                 task.__dict__.pop("execute", None)
             else:
-                setattr(task, "execute", original)
+                task.execute = original
 
 
 def _parse_mock_payload(raw: str, *, suffix: str) -> Any:

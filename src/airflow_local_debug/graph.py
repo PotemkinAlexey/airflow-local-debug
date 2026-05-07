@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import textwrap
 from collections import defaultdict
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-import textwrap
 from typing import Any
 
 from airflow_local_debug.topology import topological_task_ids as _topological_task_ids
@@ -337,9 +337,9 @@ def render_dag_svg(dag: Any) -> str:
     for task_id in topo_order:
         task = task_dict[task_id]
         x, y = positions[task_id]
-        group_id = _task_group_path(task)
-        fill = "#ffffff" if group_id is None else "#fefce8"
-        stroke = "#cbd5e1" if group_id is None else "#f59e0b"
+        group_path = _task_group_path(task)
+        fill = "#ffffff" if group_path is None else "#fefce8"
+        stroke = "#cbd5e1" if group_path is None else "#f59e0b"
         parts.append(
             f'<rect x="{x}" y="{y}" width="{box_w}" height="{box_h}" rx="14" ry="14" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="2" filter="url(#shadow)"/>'
