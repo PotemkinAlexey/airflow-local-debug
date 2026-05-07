@@ -11,6 +11,27 @@ from __future__ import annotations
 from typing import Any
 
 
+def downstream_task_ids(dag: Any, roots: set[str]) -> set[str]:
+    """Return task ids transitively downstream of ``roots`` (excluding the roots).
+
+    Walks ``downstream_task_ids`` edges via BFS. Tasks not present in
+    ``dag.task_dict`` are ignored. Used for partial-run selection and
+    upstream-failure propagation.
+    """
+    task_dict = dict(getattr(dag, "task_dict", {}) or {})
+    pending = list(sorted(root for root in roots if root in task_dict))
+    seen: set[str] = set()
+    while pending:
+        task_id = pending.pop(0)
+        downstream = set(getattr(task_dict[task_id], "downstream_task_ids", set()) or set()) & set(task_dict)
+        for child_id in sorted(downstream):
+            if child_id in roots or child_id in seen:
+                continue
+            seen.add(child_id)
+            pending.append(child_id)
+    return seen
+
+
 def topological_task_order(dag: Any) -> dict[str, int]:
     """
     Return a mapping `task_id -> ordinal index` in topological order.

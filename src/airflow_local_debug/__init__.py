@@ -69,6 +69,7 @@ from airflow_local_debug.bootstrap import (
 )
 from airflow_local_debug.compat import get_airflow_version
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
+from airflow_local_debug.dag_loader import format_dag_list
 from airflow_local_debug.deferrables import detect_deferrable_tasks
 from airflow_local_debug.dotenv import discover_dotenv_path, parse_dotenv_file, parse_dotenv_text
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
@@ -97,7 +98,6 @@ from airflow_local_debug.runner import (
     debug_dag_cli,
     debug_dag_file_cli,
     debug_dag_from_file,
-    format_dag_list,
     list_dags_from_file,
     run_full_dag,
     run_full_dag_from_file,

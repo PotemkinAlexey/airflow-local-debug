@@ -16,18 +16,14 @@ object and will decide yourself how to render it.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.util
 import json
 import logging
-import sys
 import traceback
 import warnings
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 from airflow_local_debug._state_helpers import (
@@ -46,6 +42,13 @@ from airflow_local_debug.compat import (
 )
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
 from airflow_local_debug.console import print_run_preamble
+from airflow_local_debug.dag_loader import (
+    dag_candidates_from_module,
+    dag_file_info,
+    format_dag_list,
+    load_module_from_file,
+    resolve_dag_from_module,
+)
 from airflow_local_debug.deferrables import detect_deferrable_tasks, format_deferrable_note
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.execution import strict_dag_test as _strict_dag_test
@@ -53,6 +56,13 @@ from airflow_local_debug.graph import format_dag_graph
 from airflow_local_debug.live_trace import live_task_trace
 from airflow_local_debug.mocks import TaskMockRegistry, TaskMockRule, load_task_mock_rules, local_task_mocks
 from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo, normalize_state
+from airflow_local_debug.partial_runs import (
+    build_partial_selection_note,
+    detect_external_upstreams,
+    format_external_upstream_note,
+    partial_dag_for_selected_tasks,
+    resolve_partial_task_ids,
+)
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -60,6 +70,7 @@ from airflow_local_debug.plugins import (
     ProblemLogPlugin,
     TaskContextPlugin,
 )
+from airflow_local_debug.topology import downstream_task_ids
 from airflow_local_debug.topology import topological_task_order as _topological_task_order
 from airflow_local_debug.traceback_utils import format_pretty_exception
 
@@ -69,6 +80,16 @@ _task_instance_label = task_instance_label
 _best_effort_task_result = best_effort_task_result
 _FAILED_TASK_STATES = FAILED_TASK_STATES
 _UNFINISHED_TASK_STATES = UNFINISHED_TASK_STATES
+_downstream_task_ids = downstream_task_ids
+_resolve_partial_task_ids = resolve_partial_task_ids
+_partial_dag_for_selected_tasks = partial_dag_for_selected_tasks
+_build_partial_selection_note = build_partial_selection_note
+_detect_external_upstreams = detect_external_upstreams
+_format_external_upstream_note = format_external_upstream_note
+_load_module_from_file = load_module_from_file
+_dag_candidates_from_module = dag_candidates_from_module
+_dag_file_info = dag_file_info
+_resolve_dag_from_module = resolve_dag_from_module
 
 _log = logging.getLogger(__name__)
 
@@ -481,154 +502,6 @@ def _task_state_buckets(task_runs: list[TaskRunInfo]) -> tuple[list[TaskRunInfo]
             unfinished.append(task)
     return failed, unfinished
 
-
-def _downstream_task_ids(dag: Any, roots: set[str]) -> set[str]:
-    task_dict = dict(getattr(dag, "task_dict", {}) or {})
-    pending = list(sorted(root for root in roots if root in task_dict))
-    seen: set[str] = set()
-    while pending:
-        task_id = pending.pop(0)
-        downstream_ids = set(getattr(task_dict[task_id], "downstream_task_ids", set()) or set()) & set(task_dict)
-        for child_id in sorted(downstream_ids):
-            if child_id in roots or child_id in seen:
-                continue
-            seen.add(child_id)
-            pending.append(child_id)
-    return seen
-
-
-def _task_group_path(task: Any) -> str | None:
-    task_group = getattr(task, "task_group", None)
-    if task_group is None:
-        return None
-    group_id = getattr(task_group, "group_id", None)
-    if group_id is None:
-        return None
-    text = str(group_id).strip()
-    return text or None
-
-
-def _task_group_path_contains(group_path: str | None, requested_group: str) -> bool:
-    if group_path is None:
-        return False
-    return group_path == requested_group or group_path.startswith(f"{requested_group}.")
-
-
-def _available_task_group_ids(dag: Any) -> list[str]:
-    groups: set[str] = set()
-    for task in list(getattr(dag, "task_dict", {}).values()):
-        path = _task_group_path(task)
-        while path:
-            groups.add(path)
-            parent, _, child = path.rpartition(".")
-            if not parent or not child:
-                break
-            path = parent
-    return sorted(groups)
-
-
-def _format_available(values: Iterable[str], *, limit: int = 10) -> str:
-    rows = sorted(values)
-    if not rows:
-        return "<none>"
-    suffix = "" if len(rows) <= limit else f", ... +{len(rows) - limit} more"
-    return ", ".join(rows[:limit]) + suffix
-
-
-def _resolve_partial_task_ids(
-    dag: Any,
-    *,
-    task_ids: Iterable[str] | None = None,
-    start_task_ids: Iterable[str] | None = None,
-    task_group_ids: Iterable[str] | None = None,
-) -> list[str] | None:
-    exact_ids = [str(task_id).strip() for task_id in task_ids or [] if str(task_id).strip()]
-    start_ids = [str(task_id).strip() for task_id in start_task_ids or [] if str(task_id).strip()]
-    group_ids = [str(group_id).strip() for group_id in task_group_ids or [] if str(group_id).strip()]
-    if not exact_ids and not start_ids and not group_ids:
-        return None
-
-    task_dict = dict(getattr(dag, "task_dict", {}) or {})
-    if not task_dict:
-        raise ValueError("Cannot select tasks from a DAG with no tasks.")
-
-    available_ids = set(task_dict)
-    missing_ids = sorted((set(exact_ids) | set(start_ids)) - available_ids)
-    if missing_ids:
-        raise ValueError(
-            "Unknown task id(s) for partial run: "
-            f"{', '.join(missing_ids)}. Available task ids: {_format_available(available_ids)}."
-        )
-
-    selected: set[str] = set(exact_ids)
-    if start_ids:
-        roots = set(start_ids)
-        selected.update(roots)
-        selected.update(_downstream_task_ids(dag, roots))
-
-    for group_id in group_ids:
-        matching = {
-            task_id
-            for task_id, task in task_dict.items()
-            if _task_group_path_contains(_task_group_path(task), group_id)
-        }
-        if not matching:
-            raise ValueError(
-                "Unknown task group id for partial run: "
-                f"{group_id}. Available task groups: {_format_available(_available_task_group_ids(dag))}."
-            )
-        selected.update(matching)
-
-    order = _topological_task_order(dag)
-    return sorted(selected, key=lambda task_id: (order.get(task_id, 10**9), task_id))
-
-
-def _build_partial_selection_note(dag: Any, selected_task_ids: list[str]) -> str:
-    total = len(getattr(dag, "task_dict", {}) or {})
-    selected = len(selected_task_ids)
-    return (
-        f"Partial DAG run selected {selected}/{total} task(s): "
-        f"{_format_available(selected_task_ids, limit=12)}."
-    )
-
-
-def _detect_external_upstreams(dag: Any, selected_task_ids: list[str]) -> dict[str, list[str]]:
-    """For each selected task, return upstream task ids that are NOT in the selection.
-
-    This must be called against the original (unpartitioned) DAG so the upstream
-    edges are still intact.
-    """
-    selected = set(selected_task_ids)
-    task_dict = dict(getattr(dag, "task_dict", {}) or {})
-    external: dict[str, list[str]] = {}
-    for task_id in selected_task_ids:
-        task = task_dict.get(task_id)
-        if task is None:
-            continue
-        upstream_ids = set(getattr(task, "upstream_task_ids", set()) or set())
-        unmet = sorted(upstream_ids - selected)
-        if unmet:
-            external[task_id] = unmet
-    return external
-
-
-def _format_external_upstream_note(external: dict[str, list[str]]) -> str:
-    pairs = [f"{task_id} <- {', '.join(external[task_id])}" for task_id in sorted(external)]
-    head = "; ".join(pairs[:5])
-    suffix = f"; ... +{len(pairs) - 5} more" if len(pairs) > 5 else ""
-    return (
-        "Partial run skips upstream task(s) that selected task(s) depend on: "
-        f"{head}{suffix}. XCom pulls from these upstreams will return None. "
-        "Provide --mock-file to inject upstream XCom values, or include the upstream "
-        "chain via additional --task / --start-task selectors."
-    )
-
-
-def _partial_dag_for_selected_tasks(dag: Any, selected_task_ids: list[str]) -> Any:
-    partial_subset = getattr(dag, "partial_subset", None)
-    if not callable(partial_subset):
-        raise ValueError("This Airflow DAG object does not support partial task selection.")
-    return partial_subset(selected_task_ids, include_upstream=False, include_downstream=False)
 
 
 def _normalize_task_states_for_backend(
@@ -1165,92 +1038,6 @@ def _execute_full_dag(
         raise pending_base_exception
     return result
 
-
-def _load_module_from_file(path: str) -> ModuleType:
-    resolved = str(Path(path).expanduser().resolve())
-    if not Path(resolved).exists():
-        raise FileNotFoundError(f"DAG file not found: {resolved}")
-
-    module_name = f"airflow_debug_dag_{hashlib.md5(resolved.encode()).hexdigest()}"
-    spec = importlib.util.spec_from_file_location(module_name, resolved)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load DAG module from {resolved}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-    except Exception:
-        sys.modules.pop(module_name, None)
-        raise
-    return module
-
-
-def _dag_candidates_from_module(module: ModuleType) -> list[Any]:
-    candidates: list[Any] = []
-    seen: set[int] = set()
-    for value in module.__dict__.values():
-        if isinstance(value, type):
-            continue
-        if hasattr(value, "dag_id") and hasattr(value, "task_dict"):
-            if id(value) in seen:
-                continue
-            seen.add(id(value))
-            candidates.append(value)
-    candidates.sort(key=lambda dag: str(getattr(dag, "dag_id", "<unknown>")))
-    return candidates
-
-
-def _dag_file_info(dag: Any) -> DagFileInfo:
-    task_dict = getattr(dag, "task_dict", None)
-    tasks = getattr(dag, "tasks", None)
-    if task_dict:
-        task_count = len(task_dict)
-    elif tasks:
-        task_count = len(tasks)
-    else:
-        task_count = 0
-    fileloc = getattr(dag, "fileloc", None)
-    return DagFileInfo(
-        dag_id=str(getattr(dag, "dag_id", "<unknown>")),
-        task_count=task_count,
-        fileloc=str(fileloc) if fileloc else None,
-    )
-
-
-def format_dag_list(infos: Iterable[DagFileInfo], *, source_path: str | None = None) -> str:
-    rows = list(infos)
-    heading = "DAGs"
-    if source_path:
-        heading += f" in {Path(source_path).expanduser().resolve()}"
-    lines = [heading]
-    if not rows:
-        lines.append("<none>")
-        return "\n".join(lines)
-
-    for info in rows:
-        task_label = "task" if info.task_count == 1 else "tasks"
-        lines.append(f"- {info.dag_id} ({info.task_count} {task_label})")
-    return "\n".join(lines)
-
-
-def _resolve_dag_from_module(module: ModuleType, dag_id: str | None = None) -> Any:
-    candidates = _dag_candidates_from_module(module)
-
-    if dag_id:
-        for dag in candidates:
-            if getattr(dag, "dag_id", None) == dag_id:
-                return dag
-        raise ValueError(f"DAG with dag_id='{dag_id}' not found in module {module.__name__}")
-
-    if len(candidates) == 1:
-        return candidates[0]
-
-    if not candidates:
-        raise ValueError(f"No DAG objects found in module {module.__name__}")
-
-    dag_ids = ", ".join(sorted(getattr(dag, "dag_id", "<unknown>") for dag in candidates))
-    raise ValueError(f"Multiple DAG objects found in module {module.__name__}: {dag_ids}. Pass dag_id explicitly.")
 
 
 def list_dags_from_file(
