@@ -16,16 +16,23 @@ object and will decide yourself how to render it.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import traceback
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from airflow_local_debug.cli.args import add_common_run_args, add_watch_args
+from airflow_local_debug.cli.loaders import (
+    coerce_logical_date,
+    load_cli_conf,
+    load_cli_env_files,
+    load_cli_extra_env,
+    load_cli_selector_values,
+    load_cli_task_mocks,
+)
 from airflow_local_debug.compat import (
     build_dag_test_kwargs,
     build_legacy_dag_run_kwargs,
@@ -42,7 +49,7 @@ from airflow_local_debug.execution.dag_loader import (
     resolve_dag_from_module,
 )
 from airflow_local_debug.execution.deferrables import detect_deferrable_tasks, format_deferrable_note
-from airflow_local_debug.execution.mocks import TaskMockRegistry, TaskMockRule, load_task_mock_rules, local_task_mocks
+from airflow_local_debug.execution.mocks import TaskMockRegistry, TaskMockRule, local_task_mocks
 from airflow_local_debug.execution.partial_runs import (
     build_partial_selection_note,
     detect_external_upstreams,
@@ -74,117 +81,6 @@ from airflow_local_debug.reporting.traceback_utils import format_pretty_exceptio
 
 _log = logging.getLogger(__name__)
 
-
-def _coerce_logical_date(value: str | date | datetime | None) -> datetime | None:
-    def ensure_aware(value: datetime) -> datetime:
-        if value.tzinfo is not None and value.utcoffset() is not None:
-            return value
-        return value.replace(tzinfo=timezone.utc)
-
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return ensure_aware(value)
-    if isinstance(value, date):
-        return ensure_aware(datetime.combine(value, datetime.min.time()))
-    raw = str(value).strip()
-    if not raw:
-        return None
-    try:
-        return ensure_aware(datetime.fromisoformat(raw))
-    except ValueError:
-        if "T" not in raw and " " not in raw:
-            return ensure_aware(datetime.fromisoformat(f"{raw}T00:00:00"))
-        raise
-
-
-def _load_cli_conf(*, conf_json: str | None = None, conf_file: str | None = None) -> dict[str, Any] | None:
-    if conf_json is not None and conf_file is not None:
-        raise ValueError("Use either --conf-json or --conf-file, not both.")
-
-    if conf_file is not None:
-        path = Path(conf_file).expanduser()
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise ValueError(f"Could not read --conf-file {path}: {exc}") from exc
-    elif conf_json is not None:
-        raw = conf_json
-    else:
-        return None
-
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Invalid DAG run conf JSON: {exc.msg} at line {exc.lineno} column {exc.colno}."
-        ) from exc
-
-    if not isinstance(payload, dict):
-        raise ValueError("DAG run conf must be a JSON object.")
-    return payload
-
-
-def _load_cli_extra_env(values: list[str] | None) -> dict[str, str]:
-    extra_env: dict[str, str] = {}
-    for value in values or []:
-        key, separator, raw = value.partition("=")
-        key = key.strip()
-        if not separator or not key:
-            raise ValueError("--env values must use KEY=VALUE format.")
-        extra_env[key] = raw
-    return extra_env
-
-
-def _load_cli_task_mocks(values: list[str] | None) -> list[TaskMockRule]:
-    rules: list[TaskMockRule] = []
-    for value in values or []:
-        rules.extend(load_task_mock_rules(value))
-    return rules
-
-
-def _load_cli_env_files(
-    values: list[str] | None,
-    *,
-    auto_discover: bool = True,
-    notes: list[str] | None = None,
-) -> dict[str, str]:
-    """Load and merge values from `--env-file` paths and (optionally) auto-discovered `.env`.
-
-    Later sources win over earlier ones. The auto-discovered `.env` is the
-    lowest priority and is only used when no explicit `--env-file` is given.
-    """
-    from airflow_local_debug.config.dotenv import discover_dotenv_path, parse_dotenv_file
-
-    layers: list[dict[str, str]] = []
-    explicit_paths = list(values or [])
-
-    if not explicit_paths and auto_discover:
-        auto_path = discover_dotenv_path()
-        if auto_path is not None:
-            layers.append(parse_dotenv_file(auto_path))
-            if notes is not None:
-                notes.append(f"Loaded auto-discovered env file {auto_path}")
-
-    for path in explicit_paths:
-        layers.append(parse_dotenv_file(path))
-        if notes is not None:
-            notes.append(f"Loaded env file {path}")
-
-    merged: dict[str, str] = {}
-    for layer in layers:
-        merged.update(layer)
-    return merged
-
-
-def _load_cli_selector_values(values: list[str] | None, *, option_name: str) -> list[str]:
-    selectors: list[str] = []
-    for value in values or []:
-        parts = [part.strip() for part in str(value).split(",")]
-        if any(not part for part in parts):
-            raise ValueError(f"{option_name} values must not be blank.")
-        selectors.extend(parts)
-    return selectors
 
 
 def _write_report_artifacts(result: RunResult, report_dir: str | Path, *, include_graph: bool) -> None:
@@ -396,7 +292,7 @@ def _execute_full_dag(
     pending_base_exception: BaseException | None = None
     task_mock_registry: TaskMockRegistry | None = None
     selected_task_ids: list[str] = []
-    run_logical_date = _coerce_logical_date(logical_date)
+    run_logical_date = coerce_logical_date(logical_date)
     task_mock_rules = list(task_mocks or [])
     graph_ascii: str | None = None
     deferrables: list[Any] = []
@@ -765,28 +661,28 @@ def debug_dag_cli(
         parser.error("--config-path is required for this DAG entrypoint.")
 
     try:
-        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
+        conf = load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        cli_extra_env = _load_cli_extra_env(args.env)
+        cli_extra_env = load_cli_extra_env(args.env)
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        env_file_values = _load_cli_env_files(
+        env_file_values = load_cli_env_files(
             args.env_file,
             auto_discover=not args.no_auto_env,
         )
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        task_mocks = _load_cli_task_mocks(args.mock_file)
+        task_mocks = load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        cli_task_ids = _load_cli_selector_values(args.task_ids, option_name="--task")
-        cli_start_task_ids = _load_cli_selector_values(args.start_task_ids, option_name="--start-task")
-        cli_task_group_ids = _load_cli_selector_values(args.task_group_ids, option_name="--task-group")
+        cli_task_ids = load_cli_selector_values(args.task_ids, option_name="--task")
+        cli_start_task_ids = load_cli_selector_values(args.start_task_ids, option_name="--start-task")
+        cli_task_group_ids = load_cli_selector_values(args.task_group_ids, option_name="--task-group")
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -860,11 +756,11 @@ def debug_dag_file_cli(
     args = parser.parse_args(argv)
 
     try:
-        extra_env = _load_cli_extra_env(args.env)
+        extra_env = load_cli_extra_env(args.env)
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        env_file_values = _load_cli_env_files(
+        env_file_values = load_cli_env_files(
             args.env_file,
             auto_discover=not args.no_auto_env,
         )
@@ -875,13 +771,13 @@ def debug_dag_file_cli(
     merged_extra_env.update(extra_env)
     extra_env = merged_extra_env
     try:
-        task_mocks = _load_cli_task_mocks(args.mock_file)
+        task_mocks = load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        task_ids = _load_cli_selector_values(args.task_ids, option_name="--task")
-        start_task_ids = _load_cli_selector_values(args.start_task_ids, option_name="--start-task")
-        task_group_ids = _load_cli_selector_values(args.task_group_ids, option_name="--task-group")
+        task_ids = load_cli_selector_values(args.task_ids, option_name="--task")
+        start_task_ids = load_cli_selector_values(args.start_task_ids, option_name="--start-task")
+        task_group_ids = load_cli_selector_values(args.task_group_ids, option_name="--task-group")
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -903,7 +799,7 @@ def debug_dag_file_cli(
         )
 
     try:
-        conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
+        conf = load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
 

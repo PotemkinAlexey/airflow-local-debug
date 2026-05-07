@@ -8,6 +8,13 @@ from typing import Any
 import pytest
 
 from airflow_local_debug import runner
+from airflow_local_debug.cli.loaders import (
+    coerce_logical_date,
+    load_cli_conf,
+    load_cli_env_files,
+    load_cli_extra_env,
+    load_cli_selector_values,
+)
 from airflow_local_debug.execution.dag_loader import dag_candidates_from_module
 from airflow_local_debug.execution.mocks import TaskMockRule
 from airflow_local_debug.execution.partial_runs import (
@@ -122,48 +129,48 @@ def test_duration_seconds_handles_datetimes() -> None:
 
 
 def test_coerce_logical_date_returns_none_for_none_or_blank() -> None:
-    assert runner._coerce_logical_date(None) is None
-    assert runner._coerce_logical_date("") is None
+    assert coerce_logical_date(None) is None
+    assert coerce_logical_date("") is None
 
 
 def test_coerce_logical_date_makes_naive_datetime_tz_aware() -> None:
     naive = datetime(2026, 5, 5, 9, 30)
-    coerced = runner._coerce_logical_date(naive)
+    coerced = coerce_logical_date(naive)
     assert coerced == datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc)
     assert coerced.tzinfo is timezone.utc
 
 
 def test_coerce_logical_date_preserves_existing_timezone() -> None:
     aware = datetime(2026, 5, 5, 9, 30, tzinfo=timezone.utc)
-    coerced = runner._coerce_logical_date(aware)
+    coerced = coerce_logical_date(aware)
     assert coerced is aware
 
 
 def test_coerce_logical_date_handles_date_value() -> None:
-    coerced = runner._coerce_logical_date(date(2026, 5, 5))
+    coerced = coerce_logical_date(date(2026, 5, 5))
     assert coerced == datetime(2026, 5, 5, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_parses_date_only_string() -> None:
-    coerced = runner._coerce_logical_date("2026-05-05")
+    coerced = coerce_logical_date("2026-05-05")
     assert coerced == datetime(2026, 5, 5, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_parses_iso_string() -> None:
-    coerced = runner._coerce_logical_date("2026-05-05T11:00:00")
+    coerced = coerce_logical_date("2026-05-05T11:00:00")
     assert coerced == datetime(2026, 5, 5, 11, 0, tzinfo=timezone.utc)
 
 
 def test_coerce_logical_date_rejects_garbage() -> None:
     with pytest.raises(ValueError):
-        runner._coerce_logical_date("not a date at all")
+        coerce_logical_date("not a date at all")
 
 
 # --- _load_cli_conf -------------------------------------------------------
 
 
 def test_load_cli_conf_parses_json_object() -> None:
-    assert runner._load_cli_conf(conf_json='{"dataset": "daily", "limit": 10}') == {
+    assert load_cli_conf(conf_json='{"dataset": "daily", "limit": 10}') == {
         "dataset": "daily",
         "limit": 10,
     }
@@ -173,7 +180,7 @@ def test_load_cli_conf_reads_json_file(tmp_path) -> None:
     conf_file = tmp_path / "conf.json"
     conf_file.write_text('{"enabled": true}', encoding="utf-8")
 
-    assert runner._load_cli_conf(conf_file=str(conf_file)) == {"enabled": True}
+    assert load_cli_conf(conf_file=str(conf_file)) == {"enabled": True}
 
 
 def test_load_cli_conf_rejects_invalid_payloads(tmp_path) -> None:
@@ -181,18 +188,18 @@ def test_load_cli_conf_rejects_invalid_payloads(tmp_path) -> None:
     conf_file.write_text("[1, 2, 3]", encoding="utf-8")
 
     with pytest.raises(ValueError, match="either --conf-json or --conf-file"):
-        runner._load_cli_conf(conf_json="{}", conf_file=str(conf_file))
+        load_cli_conf(conf_json="{}", conf_file=str(conf_file))
     with pytest.raises(ValueError, match="must be a JSON object"):
-        runner._load_cli_conf(conf_file=str(conf_file))
+        load_cli_conf(conf_file=str(conf_file))
     with pytest.raises(ValueError, match="Invalid DAG run conf JSON"):
-        runner._load_cli_conf(conf_json="{broken")
+        load_cli_conf(conf_json="{broken")
 
 
 # --- _load_cli_extra_env --------------------------------------------------
 
 
 def test_load_cli_extra_env_parses_key_value_pairs() -> None:
-    assert runner._load_cli_extra_env(["FOO=bar", "EMPTY=", "WITH_EQUALS=a=b"]) == {
+    assert load_cli_extra_env(["FOO=bar", "EMPTY=", "WITH_EQUALS=a=b"]) == {
         "FOO": "bar",
         "EMPTY": "",
         "WITH_EQUALS": "a=b",
@@ -201,21 +208,21 @@ def test_load_cli_extra_env_parses_key_value_pairs() -> None:
 
 def test_load_cli_extra_env_rejects_invalid_values() -> None:
     with pytest.raises(ValueError, match="KEY=VALUE"):
-        runner._load_cli_extra_env(["NOPE"])
+        load_cli_extra_env(["NOPE"])
     with pytest.raises(ValueError, match="KEY=VALUE"):
-        runner._load_cli_extra_env(["=value"])
+        load_cli_extra_env(["=value"])
 
 
 # --- partial task selection ------------------------------------------------
 
 
 def test_load_cli_selector_values_splits_repeated_and_comma_values() -> None:
-    assert runner._load_cli_selector_values(["a,b", "c"], option_name="--task") == ["a", "b", "c"]
+    assert load_cli_selector_values(["a,b", "c"], option_name="--task") == ["a", "b", "c"]
 
 
 def test_load_cli_selector_values_rejects_blanks() -> None:
     with pytest.raises(ValueError, match="--task"):
-        runner._load_cli_selector_values(["a,"], option_name="--task")
+        load_cli_selector_values(["a,"], option_name="--task")
 
 
 def test_resolve_partial_task_ids_selects_exact_tasks_only() -> None:
@@ -570,7 +577,7 @@ def test_load_cli_env_files_merges_explicit_files(tmp_path) -> None:
     file_b = tmp_path / "b.env"
     file_b.write_text("B=2\nSHARED=from_b\n")
 
-    result = runner._load_cli_env_files([str(file_a), str(file_b)])
+    result = load_cli_env_files([str(file_a), str(file_b)])
 
     assert result == {"A": "1", "B": "2", "SHARED": "from_b"}
 
@@ -579,7 +586,7 @@ def test_load_cli_env_files_auto_discovers_when_no_explicit_path(tmp_path, monke
     (tmp_path / ".env").write_text("AUTO=found\n")
     monkeypatch.chdir(tmp_path)
 
-    result = runner._load_cli_env_files(None)
+    result = load_cli_env_files(None)
 
     assert result == {"AUTO": "found"}
 
@@ -588,7 +595,7 @@ def test_load_cli_env_files_skips_auto_discovery_when_disabled(tmp_path, monkeyp
     (tmp_path / ".env").write_text("AUTO=found\n")
     monkeypatch.chdir(tmp_path)
 
-    result = runner._load_cli_env_files(None, auto_discover=False)
+    result = load_cli_env_files(None, auto_discover=False)
 
     assert result == {}
 
@@ -599,7 +606,7 @@ def test_load_cli_env_files_explicit_path_skips_auto_discovery(tmp_path, monkeyp
     explicit.write_text("EXPLICIT=yes\n")
     monkeypatch.chdir(tmp_path)
 
-    result = runner._load_cli_env_files([str(explicit)])
+    result = load_cli_env_files([str(explicit)])
 
     assert result == {"EXPLICIT": "yes"}
     assert "AUTO" not in result
