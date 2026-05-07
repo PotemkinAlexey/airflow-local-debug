@@ -25,6 +25,7 @@ import traceback
 import warnings
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
@@ -919,6 +920,133 @@ def _ensure_airflow3_serialized_dag(dag: Any, *, session: Any) -> Any:
         return DagSerialization.deserialize_dag(DagSerialization.serialize_dag(dag))
 
 
+@dataclass
+class _StrictTaskOutcome:
+    """Outcome of running one scheduled TI inside the strict loop.
+
+    `failed` is True for the airflow3 path where `_run_task` does not raise
+    on task failure but instead leaves the TI in a failed state. `return_value`
+    is the task's xcom return for trace `complete_task`. `synthesized_error`
+    is used by trace `fail_task` when there is no real exception object.
+    """
+
+    failed: bool
+    return_value: Any = None
+    synthesized_error: BaseException | None = None
+
+
+@dataclass
+class _StrictStateNames:
+    DagRunState_RUNNING: Any
+    TaskInstanceState_SCHEDULED: Any
+    TaskInstanceState_UP_FOR_RESCHEDULE: Any
+    State_finished: Any
+
+
+def _run_strict_scheduling_loop(
+    dag: Any,
+    dr: Any,
+    *,
+    session: Any,
+    dr_target_dag: Any,
+    sets_scheduled_dttm: bool,
+    timezone_module: Any,
+    state_names: _StrictStateNames,
+    run_scheduled_ti: Any,
+    task_order: dict[str, int],
+    tasks: dict[str, Any],
+    trace_session: Any | None,
+) -> Any:
+    """Shared schedulable-tick + run-task loop used by every strict backend."""
+    max_iterations = max(50, len(tasks) * 10)
+    iteration = 0
+    while dr.state == state_names.DagRunState_RUNNING:
+        iteration += 1
+        if iteration > max_iterations:
+            dag.log.warning(
+                "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
+                max_iterations,
+            )
+            break
+        session.expire_all()
+        dr.dag = dr_target_dag
+        schedulable_tis, _ = dr.update_state(session=session)
+        for schedulable in schedulable_tis:
+            if schedulable.state != state_names.TaskInstanceState_UP_FOR_RESCHEDULE:
+                schedulable.try_number += 1
+            schedulable.state = state_names.TaskInstanceState_SCHEDULED
+            if sets_scheduled_dttm:
+                schedulable.scheduled_dttm = timezone_module.utcnow()
+        session.commit()
+
+        all_tis = list(dr.get_task_instances(session=session))
+        scheduled_tis = [ti for ti in all_tis if ti.state == state_names.TaskInstanceState_SCHEDULED]
+        scheduled_tis.sort(
+            key=lambda ti: (
+                task_order.get(ti.task_id, 10**9),
+                getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
+                ti.task_id,
+            )
+        )
+
+        if not scheduled_tis:
+            failed_or_terminal = any(
+                _state_token(getattr(ti, "state", None)) in {"failed", "upstream_failed"} for ti in all_tis
+            )
+            if failed_or_terminal:
+                session.expire_all()
+                dr = session.merge(dr)
+                dr.dag = dr_target_dag
+                dr.update_state(session=session)
+                session.commit()
+                break
+            ids_unrunnable = [ti for ti in all_tis if ti.state not in state_names.State_finished]
+            if ids_unrunnable:
+                dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
+            break
+
+        for ti in scheduled_tis:
+            task = tasks[ti.task_id]
+            ti.task = task
+            _add_logger_if_needed(ti)
+            trace_context = _trace_context_for_ti(ti)
+            if trace_session is not None:
+                trace_session.begin_task(task, trace_context)
+
+            try:
+                outcome: _StrictTaskOutcome = run_scheduled_ti(ti, task)
+            except Exception as exc:
+                if trace_session is not None:
+                    trace_session.fail_task(task, trace_context, exc)
+                _set_local_task_exception(dr, ti, exc)
+                dag.log.exception("Task failed; ti=%s", ti)
+                session.expire_all()
+                dr = session.merge(dr)
+                dr.dag = dr_target_dag
+                _set_local_task_exception(dr, ti, exc)
+                dr.update_state(session=session)
+                session.commit()
+                return dr
+
+            if outcome.failed:
+                if trace_session is not None:
+                    trace_session.fail_task(
+                        task,
+                        trace_context,
+                        outcome.synthesized_error or RuntimeError(f"Task {_task_instance_label(ti) or ti.task_id} failed."),
+                    )
+                session.expire_all()
+                dr = session.merge(dr)
+                dr.dag = dr_target_dag
+                dr.update_state(session=session)
+                session.commit()
+                return dr
+
+            if trace_session is not None:
+                trace_session.complete_task(task, trace_context, outcome.return_value)
+    return dr
+
+
 def _strict_dag_test_airflow2(
     dag: Any,
     *,
@@ -956,86 +1084,34 @@ def _strict_dag_test_airflow2(
         )
         dr.dag = dag
 
-        tasks = dag.task_dict
-        # Safety cap: if state machine never advances (deferred without trigger,
-        # bug in update_state), abort instead of spinning forever. Bounded at
-        # 10 iterations per task — generous for retry/reschedule progressions.
-        max_iterations = max(50, len(tasks) * 10)
-        iteration = 0
-        while dr.state == DagRunState.RUNNING:
-            iteration += 1
-            if iteration > max_iterations:
-                dag.log.warning(
-                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
-                    max_iterations,
-                )
-                break
-            session.expire_all()
-            dr.dag = dag
-            schedulable_tis, _ = dr.update_state(session=session)
-            for schedulable in schedulable_tis:
-                if schedulable.state != TaskInstanceState.UP_FOR_RESCHEDULE:
-                    schedulable.try_number += 1
-                schedulable.state = TaskInstanceState.SCHEDULED
-            session.commit()
-
-            all_tis = list(dr.get_task_instances(session=session))
-            scheduled_tis = [ti for ti in all_tis if ti.state == TaskInstanceState.SCHEDULED]
-            scheduled_tis.sort(
-                key=lambda ti: (
-                    task_order.get(ti.task_id, 10**9),
-                    getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
-                    ti.task_id,
-                )
-            )
-
-            if not scheduled_tis:
-                failed_or_terminal = any(str(getattr(ti, "state", "") or "") in {"failed", "upstream_failed"} for ti in all_tis)
-                if failed_or_terminal:
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = dag
-                    dr.update_state(session=session)
-                    session.commit()
-                    break
-                ids_unrunnable = [ti for ti in all_tis if ti.state not in State.finished]
-                if ids_unrunnable:
-                    dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
-                break
-
+        def run_scheduled_ti(ti: Any, task: Any) -> _StrictTaskOutcome:
             triggerer_running = _triggerer_is_healthy()
-            for ti in scheduled_tis:
-                ti.task = tasks[ti.task_id]
-                _add_logger_if_needed(ti)
-                trace_context = _trace_context_for_ti(ti)
-                if trace_session is not None:
-                    trace_session.begin_task(ti.task, trace_context)
-                try:
-                    _run_task(
-                        ti=ti,
-                        inline_trigger=not triggerer_running,
-                        session=session,
-                        mark_success=False,
-                    )
-                    if trace_session is not None:
-                        trace_session.complete_task(
-                            ti.task,
-                            trace_context,
-                            _best_effort_task_result(ti),
-                        )
-                except Exception as exc:
-                    if trace_session is not None:
-                        trace_session.fail_task(ti.task, trace_context, exc)
-                    _set_local_task_exception(dr, ti, exc)
-                    dag.log.exception("Task failed; ti=%s", ti)
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = dag
-                    _set_local_task_exception(dr, ti, exc)
-                    dr.update_state(session=session)
-                    session.commit()
-                    return dr
-        return dr
+            _run_task(
+                ti=ti,
+                inline_trigger=not triggerer_running,
+                session=session,
+                mark_success=False,
+            )
+            return _StrictTaskOutcome(failed=False, return_value=_best_effort_task_result(ti))
+
+        return _run_strict_scheduling_loop(
+            dag,
+            dr,
+            session=session,
+            dr_target_dag=dag,
+            sets_scheduled_dttm=False,
+            timezone_module=timezone,
+            state_names=_StrictStateNames(
+                DagRunState_RUNNING=DagRunState.RUNNING,
+                TaskInstanceState_SCHEDULED=TaskInstanceState.SCHEDULED,
+                TaskInstanceState_UP_FOR_RESCHEDULE=TaskInstanceState.UP_FOR_RESCHEDULE,
+                State_finished=State.finished,
+            ),
+            run_scheduled_ti=run_scheduled_ti,
+            task_order=task_order,
+            tasks=dag.task_dict,
+            trace_session=trace_session,
+        )
 
 
 def _strict_dag_test_airflow3_legacy(
@@ -1091,88 +1167,31 @@ def _strict_dag_test_airflow3_legacy(
             pass
         dr.dag = dag
 
-        tasks = dag.task_dict
-        max_iterations = max(50, len(tasks) * 10)
-        iteration = 0
-        while dr.state == DagRunState.RUNNING:
-            iteration += 1
-            if iteration > max_iterations:
-                dag.log.warning(
-                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
-                    max_iterations,
-                )
-                break
-            session.expire_all()
-            dr.dag = dag
-            schedulable_tis, _ = dr.update_state(session=session)
-            for schedulable in schedulable_tis:
-                if schedulable.state != TaskInstanceState.UP_FOR_RESCHEDULE:
-                    schedulable.try_number += 1
-                schedulable.state = TaskInstanceState.SCHEDULED
-                schedulable.scheduled_dttm = timezone.utcnow()
-            session.commit()
+        def run_scheduled_ti(ti: Any, task: Any) -> _StrictTaskOutcome:
+            _run_task(ti=ti, run_triggerer=True)  # type: ignore[call-arg]
+            ti = _refresh_task_instance(session, ti)
+            if _is_failed_task_instance(ti):
+                return _StrictTaskOutcome(failed=True)
+            return _StrictTaskOutcome(failed=False, return_value=_best_effort_task_result(ti))
 
-            all_tis = list(dr.get_task_instances(session=session))
-            scheduled_tis = [ti for ti in all_tis if ti.state == TaskInstanceState.SCHEDULED]
-            scheduled_tis.sort(
-                key=lambda ti: (
-                    task_order.get(ti.task_id, 10**9),
-                    getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
-                    ti.task_id,
-                )
-            )
-
-            if not scheduled_tis:
-                failed_or_terminal = any(_state_token(getattr(ti, "state", None)) in {"failed", "upstream_failed"} for ti in all_tis)
-                if failed_or_terminal:
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = dag
-                    dr.update_state(session=session)
-                    session.commit()
-                    break
-                ids_unrunnable = [ti for ti in all_tis if ti.state not in State.finished]
-                if ids_unrunnable:
-                    dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
-                break
-
-            for ti in scheduled_tis:
-                ti.task = tasks[ti.task_id]
-                _add_logger_if_needed(ti)
-                trace_context = _trace_context_for_ti(ti)
-                if trace_session is not None:
-                    trace_session.begin_task(ti.task, trace_context)
-                try:
-                    _run_task(ti=ti, run_triggerer=True)  # type: ignore[call-arg]
-                    ti = _refresh_task_instance(session, ti)
-                    if _is_failed_task_instance(ti):
-                        if trace_session is not None:
-                            trace_session.fail_task(
-                                ti.task,
-                                trace_context,
-                                RuntimeError(f"Task {_task_instance_label(ti) or ti.task_id} failed."),
-                            )
-                        session.expire_all()
-                        dr = session.merge(dr)
-                        dr.dag = dag
-                        dr.update_state(session=session)
-                        session.commit()
-                        return dr
-                    if trace_session is not None:
-                        trace_session.complete_task(ti.task, trace_context, _best_effort_task_result(ti))
-                except Exception as exc:
-                    if trace_session is not None:
-                        trace_session.fail_task(ti.task, trace_context, exc)
-                    _set_local_task_exception(dr, ti, exc)
-                    dag.log.exception("Task failed; ti=%s", ti)
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = dag
-                    _set_local_task_exception(dr, ti, exc)
-                    dr.update_state(session=session)
-                    session.commit()
-                    return dr
-        return dr
+        return _run_strict_scheduling_loop(
+            dag,
+            dr,
+            session=session,
+            dr_target_dag=dag,
+            sets_scheduled_dttm=True,
+            timezone_module=timezone,
+            state_names=_StrictStateNames(
+                DagRunState_RUNNING=DagRunState.RUNNING,
+                TaskInstanceState_SCHEDULED=TaskInstanceState.SCHEDULED,
+                TaskInstanceState_UP_FOR_RESCHEDULE=TaskInstanceState.UP_FOR_RESCHEDULE,
+                State_finished=State.finished,
+            ),
+            run_scheduled_ti=run_scheduled_ti,
+            task_order=task_order,
+            tasks=dag.task_dict,
+            trace_session=trace_session,
+        )
 
 
 def _strict_dag_test_airflow3_serialized(
@@ -1239,88 +1258,31 @@ def _strict_dag_test_airflow3_serialized(
         )
         dr.dag = scheduler_dag
 
-        tasks = dag.task_dict
-        max_iterations = max(50, len(tasks) * 10)
-        iteration = 0
-        while dr.state == DagRunState.RUNNING:
-            iteration += 1
-            if iteration > max_iterations:
-                dag.log.warning(
-                    "Strict dag.test loop exceeded %s iterations; aborting to avoid hang.",
-                    max_iterations,
-                )
-                break
-            session.expire_all()
-            dr.dag = scheduler_dag
-            schedulable_tis, _ = dr.update_state(session=session)
-            for schedulable in schedulable_tis:
-                if schedulable.state != TaskInstanceState.UP_FOR_RESCHEDULE:
-                    schedulable.try_number += 1
-                schedulable.state = TaskInstanceState.SCHEDULED
-                schedulable.scheduled_dttm = timezone.utcnow()
-            session.commit()
+        def run_scheduled_ti(ti: Any, task: Any) -> _StrictTaskOutcome:
+            _run_task(ti=ti, task=task, run_triggerer=True)
+            ti = _refresh_task_instance(session, ti)
+            if _is_failed_task_instance(ti):
+                return _StrictTaskOutcome(failed=True)
+            return _StrictTaskOutcome(failed=False, return_value=_best_effort_task_result(ti))
 
-            all_tis = list(dr.get_task_instances(session=session))
-            scheduled_tis = [ti for ti in all_tis if ti.state == TaskInstanceState.SCHEDULED]
-            scheduled_tis.sort(
-                key=lambda ti: (
-                    task_order.get(ti.task_id, 10**9),
-                    getattr(ti, "map_index", -1) if getattr(ti, "map_index", -1) >= 0 else -1,
-                    ti.task_id,
-                )
-            )
-
-            if not scheduled_tis:
-                failed_or_terminal = any(_state_token(getattr(ti, "state", None)) in {"failed", "upstream_failed"} for ti in all_tis)
-                if failed_or_terminal:
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = scheduler_dag
-                    dr.update_state(session=session)
-                    session.commit()
-                    break
-                ids_unrunnable = [ti for ti in all_tis if ti.state not in State.finished]
-                if ids_unrunnable:
-                    dag.log.warning("No tasks to run. unrunnable tasks: %s", set(ids_unrunnable))
-                break
-
-            for ti in scheduled_tis:
-                task = tasks[ti.task_id]
-                _add_logger_if_needed(ti)
-                trace_context = _trace_context_for_ti(ti)
-                if trace_session is not None:
-                    trace_session.begin_task(task, trace_context)
-                try:
-                    _run_task(ti=ti, task=task, run_triggerer=True)
-                    ti = _refresh_task_instance(session, ti)
-                    if _is_failed_task_instance(ti):
-                        if trace_session is not None:
-                            trace_session.fail_task(
-                                task,
-                                trace_context,
-                                RuntimeError(f"Task {_task_instance_label(ti) or ti.task_id} failed."),
-                            )
-                        session.expire_all()
-                        dr = session.merge(dr)
-                        dr.dag = scheduler_dag
-                        dr.update_state(session=session)
-                        session.commit()
-                        return dr
-                    if trace_session is not None:
-                        trace_session.complete_task(task, trace_context, _best_effort_task_result(ti))
-                except Exception as exc:
-                    if trace_session is not None:
-                        trace_session.fail_task(task, trace_context, exc)
-                    _set_local_task_exception(dr, ti, exc)
-                    dag.log.exception("Task failed; ti=%s", ti)
-                    session.expire_all()
-                    dr = session.merge(dr)
-                    dr.dag = scheduler_dag
-                    _set_local_task_exception(dr, ti, exc)
-                    dr.update_state(session=session)
-                    session.commit()
-                    return dr
-        return dr
+        return _run_strict_scheduling_loop(
+            dag,
+            dr,
+            session=session,
+            dr_target_dag=scheduler_dag,
+            sets_scheduled_dttm=True,
+            timezone_module=timezone,
+            state_names=_StrictStateNames(
+                DagRunState_RUNNING=DagRunState.RUNNING,
+                TaskInstanceState_SCHEDULED=TaskInstanceState.SCHEDULED,
+                TaskInstanceState_UP_FOR_RESCHEDULE=TaskInstanceState.UP_FOR_RESCHEDULE,
+                State_finished=State.finished,
+            ),
+            run_scheduled_ti=run_scheduled_ti,
+            task_order=task_order,
+            tasks=dag.task_dict,
+            trace_session=trace_session,
+        )
 
 
 def _strict_dag_test(
