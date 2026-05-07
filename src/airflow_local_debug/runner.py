@@ -834,7 +834,7 @@ def _ensure_airflow3_serialized_dag(dag: Any, *, session: Any) -> Any:
     except ImportError:
         from airflow.serialization.serialized_objects import LazyDeserializedDAG, SerializedDAG  # type: ignore[attr-defined]
 
-        DagSerialization = SerializedDAG
+        DagSerialization = SerializedDAG  # type: ignore[misc,assignment]
 
     bundle_name = "dags-folder"
     DagBundlesManager().sync_bundles_to_db(session=session)
@@ -862,7 +862,7 @@ def _strict_dag_test_airflow2(
 ) -> Any:
     from airflow.models.dag import _get_or_create_dagrun, _run_task, _triggerer_is_healthy
     from airflow.models.dagrun import DagRun, DagRunType  # type: ignore[attr-defined]
-    from airflow.utils import timezone
+    from airflow.utils import timezone  # type: ignore[attr-defined]
     from airflow.utils.session import create_session
     from airflow.utils.state import DagRunState, State, TaskInstanceState
 
@@ -883,7 +883,7 @@ def _strict_dag_test_airflow2(
             dag=dag,
             start_date=execution_date,
             execution_date=execution_date,
-            run_id=DagRun.generate_run_id(DagRunType.MANUAL, execution_date),
+            run_id=DagRun.generate_run_id(DagRunType.MANUAL, execution_date),  # type: ignore[misc,call-arg]
             session=session,
             conf=run_conf,
             data_interval=data_interval,
@@ -983,8 +983,8 @@ def _strict_dag_test_airflow3_legacy(
     from airflow.models.dag import _get_or_create_dagrun
     from airflow.models.dagrun import DagRun
     from airflow.sdk.definitions.dag import _run_task
-    from airflow.serialization.serialized_objects import SerializedDAG
-    from airflow.utils import timezone
+    from airflow.serialization.serialized_objects import SerializedDAG  # type: ignore[attr-defined]
+    from airflow.utils import timezone  # type: ignore[attr-defined]
     from airflow.utils.session import create_session
     from airflow.utils.state import DagRunState, State, TaskInstanceState
     from airflow.utils.types import DagRunTriggeredByType, DagRunType  # type: ignore[attr-defined]
@@ -1003,7 +1003,7 @@ def _strict_dag_test_airflow3_legacy(
         logical_date = timezone.coerce_datetime(execution_date)
         run_after = logical_date or timezone.coerce_datetime(timezone.utcnow())
         data_interval = dag.timetable.infer_manual_data_interval(run_after=logical_date) if logical_date else None
-        scheduler_dag = SerializedDAG.deserialize_dag(SerializedDAG.serialize_dag(dag))  # type: ignore[arg-type]
+        scheduler_dag = SerializedDAG.deserialize_dag(SerializedDAG.serialize_dag(dag))  # type: ignore[arg-type,attr-defined]
         dr = _get_or_create_dagrun(  # type: ignore[call-arg]
             dag=scheduler_dag,
             start_date=logical_date or run_after,
@@ -1077,7 +1077,7 @@ def _strict_dag_test_airflow3_legacy(
                 if trace_session is not None:
                     trace_session.begin_task(ti.task, trace_context)
                 try:
-                    _run_task(ti=ti, run_triggerer=True)
+                    _run_task(ti=ti, run_triggerer=True)  # type: ignore[call-arg]
                     ti = _refresh_task_instance(session, ti)
                     if _is_failed_task_instance(ti):
                         if trace_session is not None:
@@ -1126,7 +1126,7 @@ def _strict_dag_test_airflow3_serialized(
     try:
         from airflow.serialization.definitions.dag import SerializedDAG
     except ImportError:
-        from airflow.serialization.serialized_objects import SerializedDAG
+        from airflow.serialization.serialized_objects import SerializedDAG  # type: ignore[attr-defined,no-redef]
 
     try:
         from airflow.serialization.encoders import coerce_to_core_timetable
@@ -1148,9 +1148,9 @@ def _strict_dag_test_airflow3_serialized(
         logical_date = timezone.coerce_datetime(execution_date)
         run_after = timezone.coerce_datetime(timezone.utcnow())
         if logical_date is None:
-            data_interval = None
+            data_interval = None  # type: ignore[unreachable]
         else:
-            timetable = coerce_to_core_timetable(dag.timetable) if coerce_to_core_timetable else dag.timetable
+            timetable = coerce_to_core_timetable(dag.timetable) if coerce_to_core_timetable else dag.timetable  # type: ignore[truthy-function,misc]
             data_interval = timetable.infer_manual_data_interval(run_after=logical_date)
 
         scheduler_dag.on_success_callback = dag.on_success_callback  # type: ignore[attr-defined, union-attr]

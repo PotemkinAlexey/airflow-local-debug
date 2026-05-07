@@ -213,7 +213,9 @@ def _serialize_dag_for_airflow3(dag: Any) -> None:
     try:
         from airflow.serialization.serialized_objects import DagSerialization  # type: ignore[attr-defined]
     except ImportError:
-        from airflow.serialization.serialized_objects import SerializedDAG as DagSerialization
+        from airflow.serialization.serialized_objects import (  # type: ignore[attr-defined,assignment]
+            SerializedDAG as DagSerialization,  # type: ignore[no-redef]
+        )
 
     encoded = DagSerialization.serialize_dag(dag)
     DagSerialization.deserialize_dag(encoded)
