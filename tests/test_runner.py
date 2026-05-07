@@ -712,6 +712,91 @@ def test_debug_dag_cli_preserves_programmatic_conf(monkeypatch: pytest.MonkeyPat
     assert captured["conf"] == {"dataset": "daily"}
 
 
+def test_debug_dag_cli_preserves_programmatic_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    report_dir = tmp_path / "report"
+    graph_svg_path = tmp_path / "graph.svg"
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=[],
+        require_config_path=True,
+        config_path="/tmp/local_config.py",
+        logical_date=date(2026, 1, 2),
+        report_dir=report_dir,
+        graph_svg_path=graph_svg_path,
+        trace=False,
+        fail_fast=False,
+        include_graph_in_report=True,
+        raise_on_failure=False,
+    )
+
+    assert result.ok
+    assert captured["config_path"] == "/tmp/local_config.py"
+    assert captured["logical_date"] == date(2026, 1, 2)
+    assert captured["report_dir"] == report_dir
+    assert captured["graph_svg_path"] == graph_svg_path
+    assert captured["trace"] is False
+    assert captured["fail_fast"] is False
+    assert captured["include_graph_in_report"] is True
+    assert captured["raise_on_failure"] is False
+
+
+def test_debug_dag_cli_cli_values_override_programmatic_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    cli_report_dir = tmp_path / "cli-report"
+    cli_graph_svg_path = tmp_path / "cli-graph.svg"
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=[
+            "--config-path",
+            "/tmp/cli_config.py",
+            "--logical-date",
+            "2026-02-03",
+            "--report-dir",
+            str(cli_report_dir),
+            "--graph-svg-path",
+            str(cli_graph_svg_path),
+            "--no-trace",
+            "--no-fail-fast",
+            "--include-graph-in-report",
+        ],
+        config_path="/tmp/programmatic_config.py",
+        logical_date=date(2026, 1, 2),
+        report_dir=tmp_path / "programmatic-report",
+        graph_svg_path=tmp_path / "programmatic-graph.svg",
+        trace=True,
+        fail_fast=True,
+        include_graph_in_report=False,
+    )
+
+    assert result.ok
+    assert captured["config_path"] == "/tmp/cli_config.py"
+    assert captured["logical_date"] == "2026-02-03"
+    assert captured["report_dir"] == str(cli_report_dir)
+    assert captured["graph_svg_path"] == str(cli_graph_svg_path)
+    assert captured["trace"] is False
+    assert captured["fail_fast"] is False
+    assert captured["include_graph_in_report"] is True
+
+
 def test_debug_dag_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

@@ -216,7 +216,22 @@ def debug_dag_cli(
     add_common_run_args(parser)
     args = parser.parse_args(argv)
 
-    if require_config_path and not args.config_path:
+    programmatic_config_path = kwargs.pop("config_path", None)
+    config_path = args.config_path if args.config_path is not None else programmatic_config_path
+    programmatic_logical_date = kwargs.pop("logical_date", None)
+    logical_date = args.logical_date if args.logical_date is not None else programmatic_logical_date
+    programmatic_report_dir = kwargs.pop("report_dir", None)
+    report_dir = args.report_dir if args.report_dir is not None else programmatic_report_dir
+    programmatic_graph_svg_path = kwargs.pop("graph_svg_path", None)
+    graph_svg_path = args.graph_svg_path if args.graph_svg_path is not None else programmatic_graph_svg_path
+    programmatic_trace = kwargs.pop("trace", True)
+    trace = False if args.no_trace else programmatic_trace
+    programmatic_fail_fast = kwargs.pop("fail_fast", True)
+    fail_fast = False if args.no_fail_fast else programmatic_fail_fast
+    programmatic_include_graph_in_report = kwargs.pop("include_graph_in_report", False)
+    include_graph_in_report = True if args.include_graph_in_report else programmatic_include_graph_in_report
+
+    if require_config_path and not config_path:
         parser.error("--config-path is required for this DAG entrypoint.")
 
     try:
@@ -269,15 +284,15 @@ def debug_dag_cli(
 
     return debug_dag(
         dag,
-        config_path=args.config_path,
-        logical_date=args.logical_date,
+        config_path=config_path,
+        logical_date=logical_date,
         conf=conf,
         extra_env=extra_env or None,
-        trace=not args.no_trace,
-        fail_fast=not args.no_fail_fast,
-        include_graph_in_report=args.include_graph_in_report,
-        report_dir=args.report_dir,
-        graph_svg_path=args.graph_svg_path,
+        trace=trace,
+        fail_fast=fail_fast,
+        include_graph_in_report=include_graph_in_report,
+        report_dir=report_dir,
+        graph_svg_path=graph_svg_path,
         task_mocks=task_mocks,
         task_ids=task_ids,
         start_task_ids=start_task_ids,
