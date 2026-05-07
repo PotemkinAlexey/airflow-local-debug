@@ -637,6 +637,38 @@ def _build_partial_selection_note(dag: Any, selected_task_ids: list[str]) -> str
     )
 
 
+def _detect_external_upstreams(dag: Any, selected_task_ids: list[str]) -> dict[str, list[str]]:
+    """For each selected task, return upstream task ids that are NOT in the selection.
+
+    This must be called against the original (unpartitioned) DAG so the upstream
+    edges are still intact.
+    """
+    selected = set(selected_task_ids)
+    task_dict = dict(getattr(dag, "task_dict", {}) or {})
+    external: dict[str, list[str]] = {}
+    for task_id in selected_task_ids:
+        task = task_dict.get(task_id)
+        if task is None:
+            continue
+        upstream_ids = set(getattr(task, "upstream_task_ids", set()) or set())
+        unmet = sorted(upstream_ids - selected)
+        if unmet:
+            external[task_id] = unmet
+    return external
+
+
+def _format_external_upstream_note(external: dict[str, list[str]]) -> str:
+    pairs = [f"{task_id} <- {', '.join(external[task_id])}" for task_id in sorted(external)]
+    head = "; ".join(pairs[:5])
+    suffix = f"; ... +{len(pairs) - 5} more" if len(pairs) > 5 else ""
+    return (
+        "Partial run skips upstream task(s) that selected task(s) depend on: "
+        f"{head}{suffix}. XCom pulls from these upstreams will return None. "
+        "Provide --mock-file to inject upstream XCom values, or include the upstream "
+        "chain via additional --task / --start-task selectors."
+    )
+
+
 def _partial_dag_for_selected_tasks(dag: Any, selected_task_ids: list[str]) -> Any:
     partial_subset = getattr(dag, "partial_subset", None)
     if not callable(partial_subset):
@@ -1528,6 +1560,24 @@ def _execute_full_dag(
         if selected is not None:
             selected_task_ids = selected
             notes.append(_build_partial_selection_note(dag, selected_task_ids))
+            external_upstreams = _detect_external_upstreams(dag, selected_task_ids)
+            mocked_external = {
+                task_id: ups
+                for task_id, ups in external_upstreams.items()
+                if any(rule.task_id in ups for rule in task_mock_rules)
+            }
+            unmocked_external = {
+                task_id: ups
+                for task_id, ups in external_upstreams.items()
+                if not any(rule.task_id in ups for rule in task_mock_rules)
+            }
+            if unmocked_external:
+                notes.append(_format_external_upstream_note(unmocked_external))
+            if mocked_external:
+                covered = sorted({up for ups in mocked_external.values() for up in ups})
+                notes.append(
+                    f"Partial run upstream XCom mocks active for: {', '.join(covered)}."
+                )
             dag = _partial_dag_for_selected_tasks(dag, selected_task_ids)
 
         graph_ascii = _build_graph_ascii(dag, notes)

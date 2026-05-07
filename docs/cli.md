@@ -129,6 +129,44 @@ to the selected subset.
 
 The final selected task ids are available as `RunResult.selected_tasks`.
 
+#### Upstream XCom dependencies
+
+When the selected subgraph has upstream tasks outside the selection, the
+runner emits a note:
+
+```
+Partial run skips upstream task(s) that selected task(s) depend on:
+transform <- extract. XCom pulls from these upstreams will return None.
+Provide --mock-file to inject upstream XCom values, or include the upstream
+chain via additional --task / --start-task selectors.
+```
+
+This catches the most common foot-gun: `--start-task transform` runs
+`transform`, but `transform` calls `xcom_pull(task_ids="extract")` which
+returns `None` because `extract` was not in the partial run. Two ways to
+fix:
+
+1. Provide a mock for the missing upstream:
+
+   ```bash
+   airflow-debug-run pipeline.py --start-task transform \
+     --mock-file ./upstream-mocks.json
+   ```
+
+   ```json
+   {"mocks": [{"task_id": "extract", "xcom": {"return_value": [1, 2, 3]}}]}
+   ```
+
+   When a `--mock-file` covers a missing upstream by exact `task_id`, the
+   runner emits a different note (`Partial run upstream XCom mocks active
+   for: extract.`) instead of the warning.
+
+2. Extend the selection to include the upstream chain:
+
+   ```bash
+   airflow-debug-run pipeline.py --start-task extract
+   ```
+
 ### XCom Dumps
 
 Use `--dump-xcom` with `--report-dir` to write `xcom.json` when XComs exist.

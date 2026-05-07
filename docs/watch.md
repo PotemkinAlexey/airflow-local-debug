@@ -74,6 +74,13 @@ each iteration is an independent `run_full_dag_from_file` call — for
 debugging logic in isolation, combine `--watch` with `--mock-file` so
 upstream output is deterministic.
 
+When the failed task pulls XComs from upstream tasks that did not run in the
+retry (the common case), the runner emits a note:
+`Partial run skips upstream task(s) that selected task(s) depend on: ...`.
+The fix is the same as for plain `--start-task`: provide a `--mock-file` for
+the missing upstream task ids, or restart the watch loop without the partial
+retry.
+
 ## Library API
 
 ```python

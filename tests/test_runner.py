@@ -250,6 +250,53 @@ def test_resolve_partial_task_ids_rejects_unknown_selector() -> None:
         runner._resolve_partial_task_ids(dag, task_group_ids=["missing"])
 
 
+def test_detect_external_upstreams_finds_unmet_dependencies() -> None:
+    a = FakeTask("a")
+    b = FakeTask("b")
+    c = FakeTask("c")
+    side = FakeTask("side")
+    _link(a, b)
+    _link(b, c)
+    _link(side, c)
+    dag = FakeDag(task_dict={"a": a, "b": b, "c": c, "side": side})
+
+    external = runner._detect_external_upstreams(dag, ["b", "c"])
+
+    assert external == {"b": ["a"], "c": ["side"]}
+
+
+def test_detect_external_upstreams_returns_empty_for_root_task() -> None:
+    a = FakeTask("a")
+    b = FakeTask("b")
+    _link(a, b)
+    dag = FakeDag(task_dict={"a": a, "b": b})
+
+    assert runner._detect_external_upstreams(dag, ["a", "b"]) == {}
+
+
+def test_detect_external_upstreams_handles_singleton_root() -> None:
+    a = FakeTask("a")
+    b = FakeTask("b")
+    _link(a, b)
+    dag = FakeDag(task_dict={"a": a, "b": b})
+
+    assert runner._detect_external_upstreams(dag, ["a"]) == {}
+
+
+def test_format_external_upstream_note_lists_pairs() -> None:
+    note = runner._format_external_upstream_note({"b": ["a"], "c": ["side"]})
+    assert "b <- a" in note
+    assert "c <- side" in note
+    assert "XCom pulls" in note
+    assert "--mock-file" in note
+
+
+def test_format_external_upstream_note_truncates_long_lists() -> None:
+    external = {f"t{i}": [f"u{i}"] for i in range(8)}
+    note = runner._format_external_upstream_note(external)
+    assert "+3 more" in note
+
+
 def test_partial_dag_for_selected_tasks_uses_airflow_subset_semantics() -> None:
     dag = FakeDag(task_dict={"a": FakeTask("a"), "b": FakeTask("b")})
 
