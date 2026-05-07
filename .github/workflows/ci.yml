@@ -38,14 +38,21 @@ jobs:
           CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${{ matrix.airflow-version }}/constraints-${{ matrix.python-version }}.txt"
           python -m pip install --constraint "${CONSTRAINT_URL}" -e ".[dev]" "apache-airflow==${{ matrix.airflow-version }}"
 
-      - name: Run tests
-        run: python -m pytest -q tests
-
-      - name: Run lint and type checks
+      - name: Run tests with coverage
         if: matrix.airflow-version == '3.2.1'
         run: |
-          python -m ruff check src tests
-          python -m mypy
+          python -m pytest tests --cov=airflow_local_debug --cov-report=xml --cov-fail-under=40
+
+      - name: Run tests
+        if: matrix.airflow-version != '3.2.1'
+        run: python -m pytest -q tests
+
+      - name: Run lint
+        if: matrix.airflow-version == '3.2.1'
+        run: python -m ruff check src tests
+
+      - name: Run mypy (Airflow ${{ matrix.airflow-version }})
+        run: python -m mypy
 
       - name: Initialize Airflow DB
         env:

@@ -133,9 +133,44 @@ Resolution order (later wins):
 4. existing process environment is preserved when none of the above set the
    key
 
-Supported `.env` syntax: `KEY=VALUE`, comments, single- and double-quoted
-values (with `\n`/`\t`/`\r` escapes inside double quotes), optional
-`export` prefix.
+### Supported syntax
+
+The bundled parser handles the common subset of `.env` syntax:
+
+- `KEY=VALUE` lines, with whitespace allowed around `=` and around the value.
+- Keys must match `[A-Za-z_][A-Za-z0-9_]*`.
+- Empty lines and `#` comments at the start of a line.
+- Inline `# comment` after an unquoted value is stripped.
+- Single-quoted values: literal text, no escapes — `'a$b'` stays as `a$b`.
+- Double-quoted values: `\n`, `\t`, `\r`, `\\`, `\"` escapes are interpreted.
+- Optional `export ` prefix (compatible with shell-sourced `.env`).
+- Empty values are allowed: `KEY=` parses as `{"KEY": ""}`.
+- Last assignment for a key wins.
+
+```env
+# auth
+DB_USER=root
+DB_PASSWORD="s3cret # not a comment"
+API_HOST = "https://api.example.com"
+GREETING="line one\nline two"
+LITERAL='no $expansion here'
+export FEATURE_FLAG=local
+```
+
+### Not supported (intentional)
+
+To stay dependency-free, the parser intentionally omits the more permissive
+features of `python-dotenv` and shell semantics:
+
+- **Variable expansion** (`KEY=$OTHER`, `KEY=${OTHER:-default}`) — values are
+  treated as literal text.
+- **Multiline values** (heredocs or triple-quoted blocks).
+- **Backtick command substitution** (`KEY=$(command)`) — taken literally.
+- **Inline comments inside double-quoted values** are preserved as data
+  (only unquoted values strip ` #...`).
+
+If you need these, parse the file with `python-dotenv` yourself and pass the
+result to `extra_env=` programmatically.
 
 The library API exposes the same parser:
 

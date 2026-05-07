@@ -1,6 +1,7 @@
 PYTHON ?= python
+COVERAGE_MIN ?= 40
 
-.PHONY: install-dev lint typecheck test build check smoke clean
+.PHONY: install-dev lint typecheck test coverage build check smoke clean
 
 install-dev:
 	$(PYTHON) -m pip install -e .[dev]
@@ -13,6 +14,13 @@ typecheck:
 
 test:
 	$(PYTHON) -m pytest -q tests
+
+coverage:
+	$(PYTHON) -m pytest tests \
+		--cov=airflow_local_debug \
+		--cov-report=term-missing \
+		--cov-report=xml \
+		--cov-fail-under=$(COVERAGE_MIN)
 
 build:
 	$(PYTHON) -m build
