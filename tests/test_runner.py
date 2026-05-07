@@ -17,6 +17,7 @@ from airflow_local_debug.cli.loaders import (
 )
 from airflow_local_debug.execution.dag_loader import dag_candidates_from_module
 from airflow_local_debug.execution.mocks import TaskMockRule
+from airflow_local_debug.execution.orchestrator import attach_graph_svg, backend_hint, resolve_graph_svg_path
 from airflow_local_debug.execution.partial_runs import (
     detect_external_upstreams,
     format_external_upstream_note,
@@ -521,8 +522,8 @@ def test_backend_hint_picks_strict_when_test_available_and_fail_fast() -> None:
     class HasTest:
         def test(self) -> None: ...
 
-    assert runner._backend_hint(HasTest(), fail_fast=True) == "dag.test.strict"
-    assert runner._backend_hint(HasTest(), fail_fast=False) == "dag.test"
+    assert backend_hint(HasTest(), fail_fast=True) == "dag.test.strict"
+    assert backend_hint(HasTest(), fail_fast=False) == "dag.test"
 
 
 def test_backend_hint_falls_back_to_dag_run_or_unsupported() -> None:
@@ -531,24 +532,24 @@ def test_backend_hint_falls_back_to_dag_run_or_unsupported() -> None:
 
     class HasNothing: ...
 
-    assert runner._backend_hint(HasRun(), fail_fast=False) == "dag.run"
-    assert runner._backend_hint(HasNothing(), fail_fast=False) == "unsupported"
+    assert backend_hint(HasRun(), fail_fast=False) == "dag.run"
+    assert backend_hint(HasNothing(), fail_fast=False) == "unsupported"
 
 
 # --- graph SVG artifact plumbing -----------------------------------------
 
 
 def test_resolve_graph_svg_path_defaults_to_report_dir(tmp_path) -> None:
-    assert runner._resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path=None) == tmp_path / "graph.svg"
-    assert runner._resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path="/tmp/custom.svg") == "/tmp/custom.svg"
-    assert runner._resolve_graph_svg_path(report_dir=None, graph_svg_path=None) is None
+    assert resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path=None) == tmp_path / "graph.svg"
+    assert resolve_graph_svg_path(report_dir=tmp_path, graph_svg_path="/tmp/custom.svg") == "/tmp/custom.svg"
+    assert resolve_graph_svg_path(report_dir=None, graph_svg_path=None) is None
 
 
 def test_attach_graph_svg_writes_path(tmp_path) -> None:
     result = RunResult(dag_id="demo", state="success")
     output_path = tmp_path / "graph.svg"
 
-    runner._attach_graph_svg(FakeDag(task_dict={}), result, output_path)
+    attach_graph_svg(FakeDag(task_dict={}), result, output_path)
 
     assert result.graph_svg_path == str(output_path.resolve())
     assert output_path.read_text(encoding="utf-8").startswith("<svg")
