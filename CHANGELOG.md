@@ -5,6 +5,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-08
+
 ### Added
 - Generic task mocks via `TaskMockRule`, `load_task_mock_rules()`,
   `task_mocks=...`, and repeatable CLI `--mock-file`. Mock rules can match by
@@ -31,6 +33,19 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - `tasks.csv` now includes a `mocked` column, and the console report marks
   mocked tasks explicitly.
 - `make check` now runs lint and type checks before tests and package build.
+
+### Fixed
+- `debug_dag_cli` now honors programmatic defaults for `config_path`,
+  `logical_date`, `report_dir`, `graph_svg_path`, `trace`, `fail_fast`, and
+  `include_graph_in_report`, while preserving CLI-overrides-programmatic
+  precedence and avoiding duplicate keyword errors.
+- Watch mode now forwards artifact flags (`--report-dir`,
+  `--include-graph-in-report`, `--xcom-json-path`, and `--graph-svg-path`) into
+  each rerun.
+- `ProblemLogPlugin` now restores partial cleanup state even when plugin exit
+  hooks raise.
+- Partial DAG runs now warn when selected tasks skip required upstream
+  dependencies.
 
 ## [0.2.0] - 2026-05-07
 
