@@ -28,6 +28,9 @@ dev = [
 airflow-debug-run = "airflow_local_debug.cli:main"
 airflow-debug-doctor = "airflow_local_debug.doctor:main"
 
+[project.entry-points.pytest11]
+airflow_local_debug = "airflow_local_debug.pytest_plugin"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

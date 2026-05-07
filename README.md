@@ -26,6 +26,7 @@ package; the exclusion is enforced by the package metadata.
 - [Documentation index](docs/index.md)
 - [CLI usage](docs/cli.md)
 - [Library API](docs/library-api.md)
+- [Pytest fixture](docs/pytest.md)
 - [Local config](docs/local-config.md)
 - [Reports and artifacts](docs/reports.md)
 - [Plugins](docs/plugins.md)
@@ -303,6 +304,26 @@ svg_text = render_dag_svg(dag)             # raw SVG string
 
 When `--report-dir` is used, the CLI also writes `graph.svg` and includes its
 path in the final report.
+
+## Pytest fixture
+
+Installing the package auto-registers a pytest plugin that exposes the local
+runner as the `airflow_local_runner` fixture:
+
+```python
+def test_my_dag(airflow_local_runner):
+    result = airflow_local_runner.run_dag(
+        "/abs/path/to/my_dag.py",
+        dag_id="my_dag",
+        config_path="/abs/path/to/airflow_defaults.py",
+    )
+    assert result.ok
+```
+
+`run_dag` accepts either a DAG object or a path to a DAG file, and forwards
+all standard runner kwargs (`task_mocks`, `task_ids`, `start_task_ids`,
+`task_group_ids`, `logical_date`, `conf`, …). See [docs/pytest.md](docs/pytest.md)
+for the full reference.
 
 ## Library-mode usage (no global state mutation)
 

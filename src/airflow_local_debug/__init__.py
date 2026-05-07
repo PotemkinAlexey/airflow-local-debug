@@ -83,6 +83,7 @@ from airflow_local_debug.plugins import (
     RepeatedProblemWarningError,
     TaskContextPlugin,
 )
+from airflow_local_debug.pytest_plugin import AirflowLocalRunner
 from airflow_local_debug.report import format_run_report, print_run_report, write_run_artifacts, write_xcom_snapshot
 from airflow_local_debug.runner import (
     debug_dag,
@@ -122,6 +123,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "AirflowDebugPlugin",
+    "AirflowLocalRunner",
     "bootstrap_airflow_env",
     "ConsoleTracePlugin",
     "debug_dag",

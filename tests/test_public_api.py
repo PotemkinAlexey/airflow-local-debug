@@ -22,3 +22,4 @@ def test_public_api_exports_core_entrypoints() -> None:
     assert hasattr(airflow_local_debug, "load_task_mock_rules")
     assert hasattr(airflow_local_debug, "DagFileInfo")
     assert hasattr(airflow_local_debug, "AirflowDebugPlugin")
+    assert hasattr(airflow_local_debug, "AirflowLocalRunner")
