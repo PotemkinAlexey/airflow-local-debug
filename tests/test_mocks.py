@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from airflow_local_debug.mocks import (
+from airflow_local_debug.execution.mocks import (
     TaskMockRule,
     load_task_mock_rules,
     local_task_mocks,

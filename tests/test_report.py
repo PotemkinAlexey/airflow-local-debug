@@ -4,7 +4,7 @@ import json
 from xml.etree import ElementTree
 
 from airflow_local_debug.models import DeferrableTaskInfo, RunResult, TaskMockInfo, TaskRunInfo
-from airflow_local_debug.report import _format_duration, format_run_gantt, format_run_report, write_run_artifacts
+from airflow_local_debug.reporting.report import _format_duration, format_run_gantt, format_run_report, write_run_artifacts
 
 
 def test_format_run_report_hides_duplicate_live_exception() -> None:

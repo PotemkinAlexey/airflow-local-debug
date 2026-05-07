@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from airflow_local_debug.bootstrap import ensure_quiet_airflow_bootstrap
+from airflow_local_debug.config.bootstrap import ensure_quiet_airflow_bootstrap
 
 
 def main() -> None:

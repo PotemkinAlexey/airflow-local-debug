@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from airflow_local_debug.topology import topological_task_ids, topological_task_order
+from airflow_local_debug.execution.topology import topological_task_ids, topological_task_order
 
 
 @dataclass

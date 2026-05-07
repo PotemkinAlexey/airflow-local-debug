@@ -26,43 +26,42 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from airflow_local_debug._state_helpers import (
-    FAILED_TASK_STATES,
-    UNFINISHED_TASK_STATES,
-    best_effort_task_result,
-    state_token,
-    task_instance_label,
-)
-from airflow_local_debug.cli_args import add_common_run_args, add_watch_args
+from airflow_local_debug.cli.args import add_common_run_args, add_watch_args
 from airflow_local_debug.compat import (
     build_dag_test_kwargs,
     build_legacy_dag_run_kwargs,
     get_airflow_version,
     has_dag_test,
 )
-from airflow_local_debug.config_loader import get_default_config_path, load_local_config
-from airflow_local_debug.console import print_run_preamble
-from airflow_local_debug.dag_loader import (
+from airflow_local_debug.config.env import bootstrap_airflow_env
+from airflow_local_debug.config.loader import get_default_config_path, load_local_config
+from airflow_local_debug.execution.dag_loader import (
     dag_candidates_from_module,
     dag_file_info,
     format_dag_list,
     load_module_from_file,
     resolve_dag_from_module,
 )
-from airflow_local_debug.deferrables import detect_deferrable_tasks, format_deferrable_note
-from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
-from airflow_local_debug.execution import strict_dag_test as _strict_dag_test
-from airflow_local_debug.graph import format_dag_graph
-from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.mocks import TaskMockRegistry, TaskMockRule, load_task_mock_rules, local_task_mocks
-from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo, normalize_state
-from airflow_local_debug.partial_runs import (
+from airflow_local_debug.execution.deferrables import detect_deferrable_tasks, format_deferrable_note
+from airflow_local_debug.execution.mocks import TaskMockRegistry, TaskMockRule, load_task_mock_rules, local_task_mocks
+from airflow_local_debug.execution.partial_runs import (
     build_partial_selection_note,
     detect_external_upstreams,
     format_external_upstream_note,
     partial_dag_for_selected_tasks,
     resolve_partial_task_ids,
 )
+from airflow_local_debug.execution.state import (
+    FAILED_TASK_STATES,
+    UNFINISHED_TASK_STATES,
+    best_effort_task_result,
+    state_token,
+    task_instance_label,
+)
+from airflow_local_debug.execution.strict_loop import strict_dag_test as _strict_dag_test
+from airflow_local_debug.execution.topology import downstream_task_ids
+from airflow_local_debug.execution.topology import topological_task_order as _topological_task_order
+from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo, normalize_state
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -70,9 +69,10 @@ from airflow_local_debug.plugins import (
     ProblemLogPlugin,
     TaskContextPlugin,
 )
-from airflow_local_debug.topology import downstream_task_ids
-from airflow_local_debug.topology import topological_task_order as _topological_task_order
-from airflow_local_debug.traceback_utils import format_pretty_exception
+from airflow_local_debug.reporting.console import print_run_preamble
+from airflow_local_debug.reporting.graph import format_dag_graph
+from airflow_local_debug.reporting.live_trace import live_task_trace
+from airflow_local_debug.reporting.traceback_utils import format_pretty_exception
 
 # Back-compat aliases for tests that still reference runner-internal names.
 _state_token = state_token
@@ -196,7 +196,7 @@ def _load_cli_env_files(
     Later sources win over earlier ones. The auto-discovered `.env` is the
     lowest priority and is only used when no explicit `--env-file` is given.
     """
-    from airflow_local_debug.dotenv import discover_dotenv_path, parse_dotenv_file
+    from airflow_local_debug.config.dotenv import discover_dotenv_path, parse_dotenv_file
 
     layers: list[dict[str, str]] = []
     explicit_paths = list(values or [])
@@ -625,7 +625,7 @@ def _normalize_result(result: RunResult) -> RunResult:
 
 
 def _write_report_artifacts(result: RunResult, report_dir: str | Path, *, include_graph: bool) -> None:
-    from airflow_local_debug.report import write_run_artifacts
+    from airflow_local_debug.reporting.report import write_run_artifacts
 
     resolved_report_dir = Path(report_dir).expanduser()
     resolved_report_dir.mkdir(parents=True, exist_ok=True)
@@ -650,7 +650,7 @@ def _attach_graph_svg(dag: Any, result: RunResult, graph_svg_path: str | Path | 
     if graph_svg_path is None:
         return
 
-    from airflow_local_debug.graph import write_dag_svg
+    from airflow_local_debug.reporting.graph import write_dag_svg
 
     try:
         result.graph_svg_path = write_dag_svg(dag, str(graph_svg_path))
@@ -1149,7 +1149,7 @@ def debug_dag(
     This is the convenience API intended for `if __name__ == "__main__":`
     blocks in normal DAG files.
     """
-    from airflow_local_debug.report import print_run_report
+    from airflow_local_debug.reporting.report import print_run_report
 
     resolved_graph_svg_path = _resolve_graph_svg_path(report_dir=report_dir, graph_svg_path=graph_svg_path)
     result = run_full_dag(
@@ -1169,7 +1169,7 @@ def debug_dag(
         collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
     if xcom_json_path is not None:
-        from airflow_local_debug.report import write_xcom_snapshot
+        from airflow_local_debug.reporting.report import write_xcom_snapshot
 
         xcom_path = write_xcom_snapshot(result, xcom_json_path)
         result.notes.append(f"Wrote XCom snapshot to {xcom_path}")
@@ -1480,7 +1480,7 @@ def debug_dag_from_file(
 
     This is the file-based equivalent of `debug_dag(...)`.
     """
-    from airflow_local_debug.report import print_run_report
+    from airflow_local_debug.reporting.report import print_run_report
 
     resolved_graph_svg_path = _resolve_graph_svg_path(report_dir=report_dir, graph_svg_path=graph_svg_path)
     result = run_full_dag_from_file(
@@ -1501,7 +1501,7 @@ def debug_dag_from_file(
         collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
     if xcom_json_path is not None:
-        from airflow_local_debug.report import write_xcom_snapshot
+        from airflow_local_debug.reporting.report import write_xcom_snapshot
 
         xcom_path = write_xcom_snapshot(result, xcom_json_path)
         result.notes.append(f"Wrote XCom snapshot to {xcom_path}")

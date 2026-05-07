@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from airflow_local_debug.topology import topological_task_ids as _topological_task_ids
+from airflow_local_debug.execution.topology import topological_task_ids as _topological_task_ids
 
 RESET = "\033[0m"
 CYAN = "\033[36m"

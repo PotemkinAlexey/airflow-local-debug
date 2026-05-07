@@ -27,7 +27,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
-from airflow_local_debug.traceback_utils import (
+from airflow_local_debug.reporting.traceback_utils import (
     StepTracer,
     StepTracerOptions,
     format_pretty_log_record,

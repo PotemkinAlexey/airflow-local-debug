@@ -62,20 +62,18 @@ Library usage (no global state mutation)
 from importlib import import_module
 from typing import Any
 
-from airflow_local_debug.bootstrap import (
+from airflow_local_debug.compat import get_airflow_version
+from airflow_local_debug.config.bootstrap import (
     ensure_quiet_airflow_bootstrap,
     silence_airflow_bootstrap_warnings,
     silenced_airflow_bootstrap_warnings,
 )
-from airflow_local_debug.compat import get_airflow_version
-from airflow_local_debug.config_loader import get_default_config_path, load_local_config
-from airflow_local_debug.dag_loader import format_dag_list
-from airflow_local_debug.deferrables import detect_deferrable_tasks
-from airflow_local_debug.dotenv import discover_dotenv_path, parse_dotenv_file, parse_dotenv_text
-from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
-from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
-from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.mocks import TaskMockRule, load_task_mock_rules, task_mock_rules_from_payload
+from airflow_local_debug.config.dotenv import discover_dotenv_path, parse_dotenv_file, parse_dotenv_text
+from airflow_local_debug.config.env import bootstrap_airflow_env
+from airflow_local_debug.config.loader import get_default_config_path, load_local_config
+from airflow_local_debug.execution.dag_loader import format_dag_list
+from airflow_local_debug.execution.deferrables import detect_deferrable_tasks
+from airflow_local_debug.execution.mocks import TaskMockRule, load_task_mock_rules, task_mock_rules_from_payload
 from airflow_local_debug.models import DagFileInfo, DeferrableTaskInfo, LocalConfig, RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
@@ -86,13 +84,16 @@ from airflow_local_debug.plugins import (
     TaskContextPlugin,
 )
 from airflow_local_debug.pytest_plugin import AirflowLocalRunner
-from airflow_local_debug.report import (
+from airflow_local_debug.reporting.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
+from airflow_local_debug.reporting.live_trace import live_task_trace
+from airflow_local_debug.reporting.report import (
     format_run_gantt,
     format_run_report,
     print_run_report,
     write_run_artifacts,
     write_xcom_snapshot,
 )
+from airflow_local_debug.reporting.traceback_utils import StepTracer, StepTracerOptions, format_pretty_exception, safe_repr, shrink
 from airflow_local_debug.runner import (
     debug_dag,
     debug_dag_cli,
@@ -102,7 +103,6 @@ from airflow_local_debug.runner import (
     run_full_dag,
     run_full_dag_from_file,
 )
-from airflow_local_debug.traceback_utils import StepTracer, StepTracerOptions, format_pretty_exception, safe_repr, shrink
 from airflow_local_debug.watch import watch_dag_file
 
 _DOCTOR_EXPORTS = {

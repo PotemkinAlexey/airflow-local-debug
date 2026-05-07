@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from airflow_local_debug.deferrables import detect_deferrable_tasks, format_deferrable_note
+from airflow_local_debug.execution.deferrables import detect_deferrable_tasks, format_deferrable_note
 
 
 @dataclass

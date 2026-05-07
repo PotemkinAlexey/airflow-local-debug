@@ -9,9 +9,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from airflow_local_debug.bootstrap import ensure_quiet_airflow_bootstrap
-from airflow_local_debug.config_loader import get_default_config_path, load_local_config
-from airflow_local_debug.env_bootstrap import _serialize_connection, _serialize_variable
+from airflow_local_debug.config.bootstrap import ensure_quiet_airflow_bootstrap
+from airflow_local_debug.config.env import _serialize_connection, _serialize_variable
+from airflow_local_debug.config.loader import get_default_config_path, load_local_config
 
 DoctorStatus = Literal["ok", "warn", "fail", "skip"]
 

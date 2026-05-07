@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from airflow_local_debug.topology import downstream_task_ids, topological_task_order
+from airflow_local_debug.execution.topology import downstream_task_ids, topological_task_order
 
 
 def task_group_path(task: Any) -> str | None:

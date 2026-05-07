@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from airflow_local_debug.mocks import TaskMockRule
+from airflow_local_debug.execution.mocks import TaskMockRule
 from airflow_local_debug.models import RunResult
 from airflow_local_debug.plugins import AirflowDebugPlugin
 from airflow_local_debug.runner import run_full_dag, run_full_dag_from_file

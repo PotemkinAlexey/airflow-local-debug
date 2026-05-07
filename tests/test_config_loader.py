@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from airflow_local_debug.config_loader import get_default_config_path, load_local_config
+from airflow_local_debug.config.loader import get_default_config_path, load_local_config
 
 
 def test_get_default_config_path_prefers_explicit_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

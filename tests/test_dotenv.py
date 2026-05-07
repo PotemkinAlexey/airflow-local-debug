@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from airflow_local_debug.dotenv import (
+from airflow_local_debug.config.dotenv import (
     discover_dotenv_path,
     merge_env_layers,
     parse_dotenv_file,

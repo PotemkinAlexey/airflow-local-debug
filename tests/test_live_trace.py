@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from airflow_local_debug.live_trace import live_task_trace
 from airflow_local_debug.plugins import AirflowDebugPlugin, DebugPluginManager
+from airflow_local_debug.reporting.live_trace import live_task_trace
 
 
 class _FakeTask:

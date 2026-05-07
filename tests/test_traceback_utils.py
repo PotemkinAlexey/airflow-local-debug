@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from airflow_local_debug.traceback_utils import (
+from airflow_local_debug.reporting.traceback_utils import (
     _classify_problem,
     format_pretty_exception,
     safe_repr,

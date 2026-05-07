@@ -162,7 +162,7 @@ def watch_dag_file(
     if runner is None:
         from airflow_local_debug.runner import run_full_dag_from_file as runner
     if reporter is None:
-        from airflow_local_debug.report import print_run_report as reporter
+        from airflow_local_debug.reporting.report import print_run_report as reporter
     if sleep is None:
         sleep = time.sleep
 

@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
+from airflow_local_debug.config.env import bootstrap_airflow_env
 from airflow_local_debug.models import LocalConfig
 
 
