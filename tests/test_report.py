@@ -48,6 +48,18 @@ def test_format_run_report_prints_graph_svg_path() -> None:
     assert "Graph SVG: /tmp/graph.svg" in rendered
 
 
+def test_format_run_report_prints_selected_tasks() -> None:
+    result = RunResult(
+        dag_id="demo",
+        state="success",
+        selected_tasks=["load", "notify"],
+    )
+
+    rendered = format_run_report(result)
+
+    assert "Selected tasks: load, notify" in rendered
+
+
 def test_format_run_report_prints_task_summary_and_durations() -> None:
     result = RunResult(
         dag_id="demo",

@@ -78,6 +78,7 @@ class RunResult:
     config_path: str | None = None
     graph_ascii: str | None = None
     graph_svg_path: str | None = None
+    selected_tasks: list[str] = field(default_factory=list)
     tasks: list[TaskRunInfo] = field(default_factory=list)
     mocks: list[TaskMockInfo] = field(default_factory=list)
     deferrables: list[DeferrableTaskInfo] = field(default_factory=list)

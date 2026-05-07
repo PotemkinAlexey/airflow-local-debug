@@ -84,6 +84,9 @@ CLI flags (both entrypoints):
 | `--conf-file` | Path to a JSON object file to pass as `dag_run.conf` |
 | `--env` | Extra `KEY=VALUE` environment variable for this run; repeatable |
 | `--mock-file` | JSON/YAML task mock file; repeatable |
+| `--task` | Run only the selected task id; repeatable / comma-separated |
+| `--start-task` | Run the selected task id and all downstream tasks; repeatable / comma-separated |
+| `--task-group` | Run tasks inside a TaskGroup id; repeatable / comma-separated |
 | `--dump-xcom` | Collect final XComs into `result.json` and `xcom.json` artifacts |
 | `--xcom-json-path` | Write final XCom snapshot to an explicit JSON path |
 | `--no-trace` | Disable live per-task console tracing |
@@ -201,6 +204,18 @@ Mocked tasks are called out in the report and get `tasks[].mocked=true` in
 `result.json`. `--dump-xcom` writes collected XComs to `RunResult.xcoms` and
 `xcom.json` when `--report-dir` is used.
 
+Partial runs use Airflow's native `DAG.partial_subset(...)` before execution:
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py \
+  --dag-id my_dag \
+  --start-task load_to_warehouse
+```
+
+Use `--task some_task` for a single task, `--start-task some_task` for that
+task plus downstreams, and `--task-group group_id` for a TaskGroup subtree.
+The selected task ids are recorded in `RunResult.selected_tasks`.
+
 ## Result object
 
 `run_full_dag(...)` and `run_full_dag_from_file(...)` return a `RunResult`:
@@ -217,6 +232,7 @@ class RunResult:
     config_path: str | None
     graph_ascii: str | None
     graph_svg_path: str | None
+    selected_tasks: list[str]
     tasks: list[TaskRunInfo]
     mocks: list[TaskMockInfo]
     deferrables: list[DeferrableTaskInfo]

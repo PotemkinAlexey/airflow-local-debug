@@ -47,5 +47,6 @@ Start here:
 
 - The runner executes the real DAG code and keeps native Airflow task/XCom behavior.
 - `fail_fast=True` is the default for local debugging; retries are disabled during the run and restored afterward.
+- Partial runs use Airflow's native DAG subset support, so reports and task instances are scoped to the selected subgraph.
 - Airflow metadata DB must be initialized because Airflow task execution still needs normal metadata tables.
 - The package intentionally excludes Airflow 3.0.x. Use Airflow 3.1+ for Airflow 3 local execution.

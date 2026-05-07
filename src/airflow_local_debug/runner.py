@@ -160,6 +160,16 @@ def _load_cli_task_mocks(values: list[str] | None) -> list[TaskMockRule]:
     return rules
 
 
+def _load_cli_selector_values(values: list[str] | None, *, option_name: str) -> list[str]:
+    selectors: list[str] = []
+    for value in values or []:
+        parts = [part.strip() for part in str(value).split(",")]
+        if any(not part for part in parts):
+            raise ValueError(f"{option_name} values must not be blank.")
+        selectors.extend(parts)
+    return selectors
+
+
 def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -348,6 +358,7 @@ def _result_from_dagrun(
     task_mock_registry: TaskMockRegistry | None = None,
     collect_xcoms: bool = False,
     deferrables: list[Any] | None = None,
+    selected_tasks: list[str] | None = None,
 ) -> RunResult:
     state = getattr(dagrun, "state", None) if dagrun is not None else None
     logical_date = None
@@ -385,6 +396,7 @@ def _result_from_dagrun(
         airflow_version=get_airflow_version(),
         config_path=config_path,
         graph_ascii=graph_ascii,
+        selected_tasks=list(selected_tasks or []),
         tasks=tasks,
         mocks=mock_infos,
         deferrables=list(deferrables or []),
@@ -494,6 +506,108 @@ def _downstream_task_ids(dag: Any, roots: set[str]) -> set[str]:
             seen.add(child_id)
             pending.append(child_id)
     return seen
+
+
+def _task_group_path(task: Any) -> str | None:
+    task_group = getattr(task, "task_group", None)
+    if task_group is None:
+        return None
+    group_id = getattr(task_group, "group_id", None)
+    if group_id is None:
+        return None
+    text = str(group_id).strip()
+    return text or None
+
+
+def _task_group_path_contains(group_path: str | None, requested_group: str) -> bool:
+    if group_path is None:
+        return False
+    return group_path == requested_group or group_path.startswith(f"{requested_group}.")
+
+
+def _available_task_group_ids(dag: Any) -> list[str]:
+    groups: set[str] = set()
+    for task in list(getattr(dag, "task_dict", {}).values()):
+        path = _task_group_path(task)
+        while path:
+            groups.add(path)
+            parent, _, child = path.rpartition(".")
+            if not parent or not child:
+                break
+            path = parent
+    return sorted(groups)
+
+
+def _format_available(values: Iterable[str], *, limit: int = 10) -> str:
+    rows = sorted(values)
+    if not rows:
+        return "<none>"
+    suffix = "" if len(rows) <= limit else f", ... +{len(rows) - limit} more"
+    return ", ".join(rows[:limit]) + suffix
+
+
+def _resolve_partial_task_ids(
+    dag: Any,
+    *,
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
+) -> list[str] | None:
+    exact_ids = [str(task_id).strip() for task_id in task_ids or [] if str(task_id).strip()]
+    start_ids = [str(task_id).strip() for task_id in start_task_ids or [] if str(task_id).strip()]
+    group_ids = [str(group_id).strip() for group_id in task_group_ids or [] if str(group_id).strip()]
+    if not exact_ids and not start_ids and not group_ids:
+        return None
+
+    task_dict = dict(getattr(dag, "task_dict", {}) or {})
+    if not task_dict:
+        raise ValueError("Cannot select tasks from a DAG with no tasks.")
+
+    available_ids = set(task_dict)
+    missing_ids = sorted((set(exact_ids) | set(start_ids)) - available_ids)
+    if missing_ids:
+        raise ValueError(
+            "Unknown task id(s) for partial run: "
+            f"{', '.join(missing_ids)}. Available task ids: {_format_available(available_ids)}."
+        )
+
+    selected: set[str] = set(exact_ids)
+    if start_ids:
+        roots = set(start_ids)
+        selected.update(roots)
+        selected.update(_downstream_task_ids(dag, roots))
+
+    for group_id in group_ids:
+        matching = {
+            task_id
+            for task_id, task in task_dict.items()
+            if _task_group_path_contains(_task_group_path(task), group_id)
+        }
+        if not matching:
+            raise ValueError(
+                "Unknown task group id for partial run: "
+                f"{group_id}. Available task groups: {_format_available(_available_task_group_ids(dag))}."
+            )
+        selected.update(matching)
+
+    order = _topological_task_order(dag)
+    return sorted(selected, key=lambda task_id: (order.get(task_id, 10**9), task_id))
+
+
+def _build_partial_selection_note(dag: Any, selected_task_ids: list[str]) -> str:
+    total = len(getattr(dag, "task_dict", {}) or {})
+    selected = len(selected_task_ids)
+    return (
+        f"Partial DAG run selected {selected}/{total} task(s): "
+        f"{_format_available(selected_task_ids, limit=12)}."
+    )
+
+
+def _partial_dag_for_selected_tasks(dag: Any, selected_task_ids: list[str]) -> Any:
+    partial_subset = getattr(dag, "partial_subset", None)
+    if not callable(partial_subset):
+        raise ValueError("This Airflow DAG object does not support partial task selection.")
+    return partial_subset(selected_task_ids, include_upstream=False, include_downstream=False)
 
 
 def _normalize_task_states_for_backend(
@@ -1318,6 +1432,7 @@ def _error_result(
     task_mock_registry: TaskMockRegistry | None = None,
     collect_xcoms: bool = False,
     deferrables: list[Any] | None = None,
+    selected_tasks: list[str] | None = None,
 ) -> RunResult:
     return _result_from_dagrun(
         dag,
@@ -1334,6 +1449,7 @@ def _error_result(
         task_mock_registry=task_mock_registry,
         collect_xcoms=collect_xcoms,
         deferrables=deferrables,
+        selected_tasks=selected_tasks,
     )
 
 
@@ -1351,6 +1467,9 @@ def _execute_full_dag(
     task_mocks: Iterable[TaskMockRule] | None,
     collect_xcoms: bool,
     notes: list[str],
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
     graph_svg_path: str | Path | None = None,
 ) -> RunResult:
     backend: str | None = None
@@ -1358,35 +1477,52 @@ def _execute_full_dag(
     result: RunResult | None = None
     pending_base_exception: BaseException | None = None
     task_mock_registry: TaskMockRegistry | None = None
+    selected_task_ids: list[str] = []
     run_logical_date = _coerce_logical_date(logical_date)
     task_mock_rules = list(task_mocks or [])
-    graph_ascii = _build_graph_ascii(dag, notes)
-    backend_hint = _backend_hint(dag, fail_fast=fail_fast)
-    deferrables = detect_deferrable_tasks(dag, backend_hint=backend_hint)
-    deferrable_note = format_deferrable_note(deferrables)
-    if deferrable_note:
-        notes.append(deferrable_note)
-    run_context: dict[str, Any] = {
-        "config_path": config_path,
-        "logical_date": _serialize_datetime(run_logical_date),
-        "conf": dict(conf or {}),
-        "extra_env": dict(extra_env or {}),
-        "backend_hint": backend_hint,
-        "graph_ascii": graph_ascii,
-        "task_mocks": [rule.describe() for rule in task_mock_rules],
-        "deferrables": [info.task_id for info in deferrables],
-        "notes": notes,
-    }
-    plugin_manager = _build_plugin_manager(trace=trace, plugins=plugins, notes=notes)
-    print_run_preamble(
-        dag,
-        backend_hint=run_context["backend_hint"],
-        config_path=config_path,
-        logical_date=run_context["logical_date"],
-        graph_text=graph_ascii,
-    )
-    plugin_manager.before_run(dag, run_context)
+    graph_ascii: str | None = None
+    deferrables: list[Any] = []
+    run_context: dict[str, Any] = {}
+    plugin_manager: DebugPluginManager | None = None
     try:
+        selected = _resolve_partial_task_ids(
+            dag,
+            task_ids=task_ids,
+            start_task_ids=start_task_ids,
+            task_group_ids=task_group_ids,
+        )
+        if selected is not None:
+            selected_task_ids = selected
+            notes.append(_build_partial_selection_note(dag, selected_task_ids))
+            dag = _partial_dag_for_selected_tasks(dag, selected_task_ids)
+
+        graph_ascii = _build_graph_ascii(dag, notes)
+        backend_hint = _backend_hint(dag, fail_fast=fail_fast)
+        deferrables = detect_deferrable_tasks(dag, backend_hint=backend_hint)
+        deferrable_note = format_deferrable_note(deferrables)
+        if deferrable_note:
+            notes.append(deferrable_note)
+        run_context = {
+            "config_path": config_path,
+            "logical_date": _serialize_datetime(run_logical_date),
+            "conf": dict(conf or {}),
+            "extra_env": dict(extra_env or {}),
+            "backend_hint": backend_hint,
+            "graph_ascii": graph_ascii,
+            "task_mocks": [rule.describe() for rule in task_mock_rules],
+            "selected_tasks": list(selected_task_ids),
+            "deferrables": [info.task_id for info in deferrables],
+            "notes": notes,
+        }
+        plugin_manager = _build_plugin_manager(trace=trace, plugins=plugins, notes=notes)
+        print_run_preamble(
+            dag,
+            backend_hint=run_context["backend_hint"],
+            config_path=config_path,
+            logical_date=run_context["logical_date"],
+            graph_text=graph_ascii,
+        )
+        plugin_manager.before_run(dag, run_context)
         with bootstrap_airflow_env(config=local_config, extra_env=extra_env), _local_task_policy(
             dag,
             fail_fast=fail_fast,
@@ -1425,6 +1561,7 @@ def _execute_full_dag(
                     task_mock_registry=task_mock_registry,
                     collect_xcoms=collect_xcoms,
                     deferrables=deferrables,
+                    selected_tasks=selected_task_ids,
                 )
                 return result
 
@@ -1450,6 +1587,7 @@ def _execute_full_dag(
                     task_mock_registry=task_mock_registry,
                     collect_xcoms=collect_xcoms,
                     deferrables=deferrables,
+                    selected_tasks=selected_task_ids,
                 )
                 return result
 
@@ -1459,6 +1597,7 @@ def _execute_full_dag(
                 airflow_version=get_airflow_version(),
                 config_path=config_path,
                 graph_ascii=graph_ascii,
+                selected_tasks=selected_task_ids,
                 deferrables=deferrables,
                 notes=notes,
                 exception="This Airflow runtime exposes neither dag.test() nor dag.run().",
@@ -1480,6 +1619,7 @@ def _execute_full_dag(
             task_mock_registry=task_mock_registry,
             collect_xcoms=collect_xcoms,
             deferrables=deferrables,
+            selected_tasks=selected_task_ids,
         )
     except BaseException as exc:
         # SystemExit(0) is a clean shutdown, not a DAG failure — re-raise without
@@ -1501,6 +1641,7 @@ def _execute_full_dag(
                 task_mock_registry=task_mock_registry,
                 collect_xcoms=collect_xcoms,
                 deferrables=deferrables,
+                selected_tasks=selected_task_ids,
             )
             pending_base_exception = exc
     finally:
@@ -1511,12 +1652,14 @@ def _execute_full_dag(
                 airflow_version=get_airflow_version(),
                 config_path=config_path,
                 graph_ascii=graph_ascii,
+                selected_tasks=selected_task_ids,
                 notes=notes,
                 exception="Local DAG run did not produce a result.",
                 exception_raw="Local DAG run did not produce a result.",
             )
         _attach_graph_svg(dag, result, graph_svg_path)
-        plugin_manager.after_run(dag, run_context, result)
+        if plugin_manager is not None:
+            plugin_manager.after_run(dag, run_context, result)
 
     if pending_base_exception is not None:
         raise pending_base_exception
@@ -1634,6 +1777,9 @@ def run_full_dag(
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     task_mocks: Iterable[TaskMockRule] | None = None,
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
     collect_xcoms: bool = False,
 ) -> RunResult:
     """
@@ -1682,6 +1828,9 @@ def run_full_dag(
         task_mocks=task_mocks,
         collect_xcoms=collect_xcoms,
         notes=notes,
+        task_ids=task_ids,
+        start_task_ids=start_task_ids,
+        task_group_ids=task_group_ids,
         graph_svg_path=graph_svg_path,
     )
 
@@ -1703,6 +1852,9 @@ def debug_dag(
     raise_on_failure: bool = True,
     fail_fast: bool = True,
     task_mocks: Iterable[TaskMockRule] | None = None,
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
 ) -> RunResult:
     """
     Run a DAG locally and immediately print the standard final report.
@@ -1724,6 +1876,9 @@ def debug_dag(
         fail_fast=fail_fast,
         plugins=plugins,
         task_mocks=task_mocks,
+        task_ids=task_ids,
+        start_task_ids=start_task_ids,
+        task_group_ids=task_group_ids,
         collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
     if xcom_json_path is not None:
@@ -1787,6 +1942,24 @@ def debug_dag_cli(
         help="JSON/YAML task mock file. May be passed multiple times.",
     )
     parser.add_argument(
+        "--task",
+        dest="task_ids",
+        action="append",
+        help="Run only this task id. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
+        "--start-task",
+        dest="start_task_ids",
+        action="append",
+        help="Run this task id and all downstream tasks. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
+        "--task-group",
+        dest="task_group_ids",
+        action="append",
+        help="Run tasks inside this TaskGroup id. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
         "--dump-xcom",
         action="store_true",
         help="Collect final XComs into result.json and xcom.json artifacts.",
@@ -1838,6 +2011,12 @@ def debug_dag_cli(
         task_mocks = _load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        cli_task_ids = _load_cli_selector_values(args.task_ids, option_name="--task")
+        cli_start_task_ids = _load_cli_selector_values(args.start_task_ids, option_name="--start-task")
+        cli_task_group_ids = _load_cli_selector_values(args.task_group_ids, option_name="--task-group")
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if conf is None:
         conf = kwargs.pop("conf", None)
@@ -1853,6 +2032,12 @@ def debug_dag_cli(
     programmatic_collect_xcoms = bool(kwargs.pop("collect_xcoms", False))
     programmatic_xcom_json_path = kwargs.pop("xcom_json_path", None)
     xcom_json_path = args.xcom_json_path or programmatic_xcom_json_path
+    programmatic_task_ids = kwargs.pop("task_ids", None)
+    programmatic_start_task_ids = kwargs.pop("start_task_ids", None)
+    programmatic_task_group_ids = kwargs.pop("task_group_ids", None)
+    task_ids = cli_task_ids or programmatic_task_ids
+    start_task_ids = cli_start_task_ids or programmatic_start_task_ids
+    task_group_ids = cli_task_group_ids or programmatic_task_group_ids
 
     return debug_dag(
         dag,
@@ -1866,6 +2051,9 @@ def debug_dag_cli(
         report_dir=args.report_dir,
         graph_svg_path=args.graph_svg_path,
         task_mocks=task_mocks,
+        task_ids=task_ids,
+        start_task_ids=start_task_ids,
+        task_group_ids=task_group_ids,
         collect_xcoms=programmatic_collect_xcoms or args.dump_xcom or xcom_json_path is not None,
         xcom_json_path=xcom_json_path,
         **kwargs,
@@ -1928,6 +2116,24 @@ def debug_dag_file_cli(
         help="JSON/YAML task mock file. May be passed multiple times.",
     )
     parser.add_argument(
+        "--task",
+        dest="task_ids",
+        action="append",
+        help="Run only this task id. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
+        "--start-task",
+        dest="start_task_ids",
+        action="append",
+        help="Run this task id and all downstream tasks. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
+        "--task-group",
+        dest="task_group_ids",
+        action="append",
+        help="Run tasks inside this TaskGroup id. May be passed multiple times or comma-separated.",
+    )
+    parser.add_argument(
         "--dump-xcom",
         action="store_true",
         help="Collect final XComs into result.json and xcom.json artifacts.",
@@ -1972,6 +2178,12 @@ def debug_dag_file_cli(
         task_mocks = _load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        task_ids = _load_cli_selector_values(args.task_ids, option_name="--task")
+        start_task_ids = _load_cli_selector_values(args.start_task_ids, option_name="--start-task")
+        task_group_ids = _load_cli_selector_values(args.task_group_ids, option_name="--task-group")
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.list_dags:
         try:
@@ -2008,6 +2220,9 @@ def debug_dag_file_cli(
         report_dir=args.report_dir,
         graph_svg_path=args.graph_svg_path,
         task_mocks=task_mocks,
+        task_ids=task_ids,
+        start_task_ids=start_task_ids,
+        task_group_ids=task_group_ids,
         collect_xcoms=args.dump_xcom or args.xcom_json_path is not None,
         xcom_json_path=args.xcom_json_path,
     )
@@ -2026,6 +2241,9 @@ def run_full_dag_from_file(
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     task_mocks: Iterable[TaskMockRule] | None = None,
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
     collect_xcoms: bool = False,
 ) -> RunResult:
     """
@@ -2061,6 +2279,9 @@ def run_full_dag_from_file(
                 task_mocks=task_mocks,
                 collect_xcoms=collect_xcoms,
                 notes=notes,
+                task_ids=task_ids,
+                start_task_ids=start_task_ids,
+                task_group_ids=task_group_ids,
                 graph_svg_path=graph_svg_path,
             )
     except Exception as exc:
@@ -2092,6 +2313,9 @@ def debug_dag_from_file(
     raise_on_failure: bool = True,
     fail_fast: bool = True,
     task_mocks: Iterable[TaskMockRule] | None = None,
+    task_ids: Iterable[str] | None = None,
+    start_task_ids: Iterable[str] | None = None,
+    task_group_ids: Iterable[str] | None = None,
 ) -> RunResult:
     """
     Import a DAG file, run it locally, and immediately print the standard report.
@@ -2113,6 +2337,9 @@ def debug_dag_from_file(
         fail_fast=fail_fast,
         plugins=plugins,
         task_mocks=task_mocks,
+        task_ids=task_ids,
+        start_task_ids=start_task_ids,
+        task_group_ids=task_group_ids,
         collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
     if xcom_json_path is not None:

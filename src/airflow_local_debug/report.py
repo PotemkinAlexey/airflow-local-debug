@@ -101,6 +101,8 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
         lines.append(f"Logical date: {result.logical_date}")
     if result.config_path:
         lines.append(f"Config: {result.config_path}")
+    if result.selected_tasks:
+        lines.append(f"Selected tasks: {', '.join(result.selected_tasks)}")
     if result.graph_svg_path:
         lines.append(f"Graph SVG: {result.graph_svg_path}")
 

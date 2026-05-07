@@ -42,6 +42,14 @@ airflow-debug-run /absolute/path/to/my_dag.py \
   --report-dir ./airflow-debug-report
 ```
 
+Run only part of a DAG:
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py \
+  --dag-id my_dag \
+  --start-task load_to_warehouse
+```
+
 ### Run Flags
 
 | Flag | Meaning |
@@ -54,6 +62,9 @@ airflow-debug-run /absolute/path/to/my_dag.py \
 | `--conf-file` | Path to a JSON object file passed as `dag_run.conf`. |
 | `--env KEY=VALUE` | Extra environment variable for this run. May be repeated. |
 | `--mock-file` | JSON/YAML task mock file. May be repeated. |
+| `--task` | Run only the selected task id. May be repeated or comma-separated. |
+| `--start-task` | Run the selected task id and all downstream tasks. May be repeated or comma-separated. |
+| `--task-group` | Run tasks inside a TaskGroup id. May be repeated or comma-separated. |
 | `--dump-xcom` | Collect final XComs into `result.json` and `xcom.json` artifacts. |
 | `--xcom-json-path` | Write final XCom snapshot to an explicit JSON path. |
 | `--no-trace` | Disable live per-task console tracing. |
@@ -105,6 +116,18 @@ Supported selectors:
 
 Rules are required by default: if a rule matches no task, the run fails before
 execution. Set `"required": false` for optional mocks.
+
+### Partial Runs
+
+Partial runs use Airflow's native `DAG.partial_subset(...)` before execution.
+The rendered graph, executed task instances, report, and `result.json` are scoped
+to the selected subset.
+
+- `--task load`: run only `load`.
+- `--start-task load`: run `load` and all downstream tasks.
+- `--task-group warehouse`: run tasks in `warehouse` and nested task groups.
+
+The final selected task ids are available as `RunResult.selected_tasks`.
 
 ### XCom Dumps
 

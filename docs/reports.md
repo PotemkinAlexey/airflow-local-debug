@@ -64,6 +64,8 @@ Important fields:
 
 - `ok` is not serialized as a field because it is a property. Use `state == "success"` and `exception is null`.
 - `state` is normalized to lowercase.
+- `selected_tasks` lists the effective partial-run task ids when `--task`,
+  `--start-task`, `--task-group`, or the corresponding library arguments were used.
 - `tasks[].duration_seconds` is present when Airflow exposes `start_date` and `end_date`.
 - `tasks[].mocked` is true when a task was replaced by a local mock rule.
 - `mocks[]` lists applied mock rules.

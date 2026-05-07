@@ -19,10 +19,14 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   trigger handling mode.
 - Ruff and Mypy development checks, exposed through `make lint`,
   `make typecheck`, `make check`, and CI.
+- Partial DAG runs via CLI `--task`, `--start-task`, `--task-group`, library
+  `task_ids=...`, `start_task_ids=...`, `task_group_ids=...`, and
+  `RunResult.selected_tasks`.
 
 ### Changed
 - `RunResult` now includes `mocks` and `xcoms`.
 - `RunResult` now includes `deferrables`.
+- `RunResult` now includes `selected_tasks`.
 - `TaskRunInfo` now includes `mocked`.
 - `tasks.csv` now includes a `mocked` column, and the console report marks
   mocked tasks explicitly.

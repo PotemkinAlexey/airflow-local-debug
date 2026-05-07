@@ -93,6 +93,19 @@ result = run_full_dag(dag, collect_xcoms=True)
 assert result.xcoms["load_to_warehouse"]["return_value"]["rows_loaded"] == 120
 ```
 
+Run only part of a DAG:
+
+```python
+result = run_full_dag(dag, start_task_ids=["load_to_warehouse"])
+assert result.selected_tasks == ["load_to_warehouse", "notify"]
+```
+
+Selection parameters:
+
+- `task_ids`: run only these exact task ids.
+- `start_task_ids`: run these task ids and all downstream tasks.
+- `task_group_ids`: run tasks inside these TaskGroup ids, including nested groups.
+
 ### `run_full_dag_from_file`
 
 `run_full_dag_from_file` imports a DAG file after applying local environment bootstrap:
@@ -209,6 +222,7 @@ raise SystemExit(result.exit_code)
 - `config_path`
 - `graph_ascii`
 - `graph_svg_path`
+- `selected_tasks`
 - `tasks`
 - `mocks`
 - `deferrables`

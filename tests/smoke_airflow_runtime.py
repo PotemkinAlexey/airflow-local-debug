@@ -126,6 +126,30 @@ def _run_fail_fast_smoke() -> None:
     }
 
 
+def _run_partial_smoke() -> None:
+    with DAG(
+        dag_id="ald_ci_partial",
+        schedule=None,
+        start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    ) as dag:
+        first = EmptyOperator(task_id="first")
+        middle = EmptyOperator(task_id="middle")
+        last = EmptyOperator(task_id="last")
+        first >> middle >> last
+
+    result = run_full_dag(
+        dag,
+        logical_date=datetime(2026, 1, 4, tzinfo=timezone.utc),
+        trace=False,
+        fail_fast=True,
+        start_task_ids=["middle"],
+    )
+    assert result.backend == "dag.test.strict"
+    assert result.ok, result.exception_raw
+    assert result.selected_tasks == ["middle", "last"]
+    assert [(task.task_id, task.state) for task in result.tasks] == [("middle", "success"), ("last", "success")]
+
+
 def main() -> None:
     version = getattr(airflow, "__version__", None)
     assert is_supported_airflow_version(version), f"Unsupported Airflow version in smoke: {version}"
@@ -133,6 +157,7 @@ def main() -> None:
     _run_doctor_smoke()
     _run_success_smoke()
     _run_fail_fast_smoke()
+    _run_partial_smoke()
 
 
 if __name__ == "__main__":

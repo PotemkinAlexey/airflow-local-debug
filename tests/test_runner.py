@@ -19,12 +19,37 @@ class FakeTask:
     task_id: str
     upstream_task_ids: set[str] = field(default_factory=set)
     downstream_task_ids: set[str] = field(default_factory=set)
+    task_group: Any = None
+
+
+@dataclass
+class FakeTaskGroup:
+    group_id: str
 
 
 @dataclass
 class FakeDag:
     task_dict: dict[str, FakeTask]
     dag_id: str = "demo"
+
+    def partial_subset(
+        self,
+        task_ids_or_regex: list[str],
+        include_downstream: bool = False,
+        include_upstream: bool = True,
+        include_direct_upstream: bool = False,
+    ) -> FakeDag:
+        subset = FakeDag(
+            task_dict={task_id: self.task_dict[task_id] for task_id in task_ids_or_regex},
+            dag_id=self.dag_id,
+        )
+        subset.partial_subset_args = {
+            "task_ids_or_regex": list(task_ids_or_regex),
+            "include_downstream": include_downstream,
+            "include_upstream": include_upstream,
+            "include_direct_upstream": include_direct_upstream,
+        }
+        return subset
 
 
 def _link(parent: FakeTask, child: FakeTask) -> None:
@@ -163,6 +188,80 @@ def test_load_cli_extra_env_rejects_invalid_values() -> None:
         runner._load_cli_extra_env(["NOPE"])
     with pytest.raises(ValueError, match="KEY=VALUE"):
         runner._load_cli_extra_env(["=value"])
+
+
+# --- partial task selection ------------------------------------------------
+
+
+def test_load_cli_selector_values_splits_repeated_and_comma_values() -> None:
+    assert runner._load_cli_selector_values(["a,b", "c"], option_name="--task") == ["a", "b", "c"]
+
+
+def test_load_cli_selector_values_rejects_blanks() -> None:
+    with pytest.raises(ValueError, match="--task"):
+        runner._load_cli_selector_values(["a,"], option_name="--task")
+
+
+def test_resolve_partial_task_ids_selects_exact_tasks_only() -> None:
+    a = FakeTask("a")
+    b = FakeTask("b")
+    c = FakeTask("c")
+    _link(a, b)
+    _link(b, c)
+    dag = FakeDag(task_dict={"a": a, "b": b, "c": c})
+
+    assert runner._resolve_partial_task_ids(dag, task_ids=["b"]) == ["b"]
+
+
+def test_resolve_partial_task_ids_selects_start_task_downstream() -> None:
+    a = FakeTask("a")
+    b = FakeTask("b")
+    c = FakeTask("c")
+    side = FakeTask("side")
+    _link(a, b)
+    _link(b, c)
+    dag = FakeDag(task_dict={"a": a, "b": b, "c": c, "side": side})
+
+    assert runner._resolve_partial_task_ids(dag, start_task_ids=["b"]) == ["b", "c"]
+
+
+def test_resolve_partial_task_ids_selects_task_group_descendants() -> None:
+    group = FakeTaskGroup("extract")
+    nested_group = FakeTaskGroup("extract.clean")
+    a = FakeTask("extract.raw", task_group=group)
+    b = FakeTask("extract.clean.normalize", task_group=nested_group)
+    c = FakeTask("load")
+    _link(a, b)
+    _link(b, c)
+    dag = FakeDag(task_dict={"extract.raw": a, "extract.clean.normalize": b, "load": c})
+
+    assert runner._resolve_partial_task_ids(dag, task_group_ids=["extract"]) == [
+        "extract.raw",
+        "extract.clean.normalize",
+    ]
+
+
+def test_resolve_partial_task_ids_rejects_unknown_selector() -> None:
+    dag = FakeDag(task_dict={"a": FakeTask("a")})
+
+    with pytest.raises(ValueError, match="Unknown task id"):
+        runner._resolve_partial_task_ids(dag, task_ids=["missing"])
+    with pytest.raises(ValueError, match="Unknown task group"):
+        runner._resolve_partial_task_ids(dag, task_group_ids=["missing"])
+
+
+def test_partial_dag_for_selected_tasks_uses_airflow_subset_semantics() -> None:
+    dag = FakeDag(task_dict={"a": FakeTask("a"), "b": FakeTask("b")})
+
+    subset = runner._partial_dag_for_selected_tasks(dag, ["b"])
+
+    assert list(subset.task_dict) == ["b"]
+    assert subset.partial_subset_args == {
+        "task_ids_or_regex": ["b"],
+        "include_downstream": False,
+        "include_upstream": False,
+        "include_direct_upstream": False,
+    }
 
 
 # --- _state_token / _task_state_buckets -----------------------------------
@@ -548,6 +647,33 @@ def test_debug_dag_cli_passes_task_mocks_and_xcom_flags(monkeypatch: pytest.Monk
     assert captured["xcom_json_path"] == str(tmp_path / "xcom.json")
 
 
+def test_debug_dag_cli_passes_partial_selectors(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=[
+            "--task",
+            "one,two",
+            "--start-task",
+            "middle",
+            "--task-group",
+            "warehouse",
+        ],
+    )
+
+    assert result.ok
+    assert captured["task_ids"] == ["one", "two"]
+    assert captured["start_task_ids"] == ["middle"]
+    assert captured["task_group_ids"] == ["warehouse"]
+
+
 def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     captured: dict[str, Any] = {}
 
@@ -677,3 +803,30 @@ def test_debug_dag_file_cli_passes_task_mocks(monkeypatch: pytest.MonkeyPatch, t
 
     assert result.ok
     assert captured["task_mocks"] == [TaskMockRule(task_id_glob="load_*")]
+
+
+def test_debug_dag_file_cli_passes_partial_selectors(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag_from_file(dag_file: str, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag_from_file", fake_debug_dag_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=[
+            "/tmp/demo_dag.py",
+            "--task",
+            "one",
+            "--start-task",
+            "middle,end",
+            "--task-group",
+            "warehouse",
+        ],
+    )
+
+    assert result.ok
+    assert captured["task_ids"] == ["one"]
+    assert captured["start_task_ids"] == ["middle", "end"]
+    assert captured["task_group_ids"] == ["warehouse"]

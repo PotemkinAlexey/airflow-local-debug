@@ -16,6 +16,7 @@ Result object
 `RunResult` exposes:
 - `.ok` — True only if state == "success" and no exception
 - `.state`, `.exception`, `.tasks` (list of `TaskRunInfo`), `.notes`, `.graph_ascii`
+- `.selected_tasks` — effective task ids when a partial run was requested
 - `.backend` — one of "dag.test", "dag.test.strict", "dag.run", "unsupported"
 
 Plugins
