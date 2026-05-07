@@ -98,6 +98,22 @@ def test_first_failed_task_id_ignores_non_failure_states() -> None:
     assert watch.first_failed_task_id(result) is None
 
 
+def test_first_failed_task_id_skips_upstream_failed_to_find_real_root() -> None:
+    """`upstream_failed` is not a hard failure — re-running such a task
+    without first re-running its broken ancestor is pointless.
+    """
+    result = RunResult(
+        dag_id="demo",
+        tasks=[
+            TaskRunInfo(task_id="extract", state="success"),
+            TaskRunInfo(task_id="transform", state="upstream_failed"),
+            TaskRunInfo(task_id="load", state="failed"),
+        ],
+    )
+
+    assert watch.first_failed_task_id(result) == "load"
+
+
 def test_purge_module_cache_drops_modules_under_root(tmp_path: Path) -> None:
     fake_module_file = tmp_path / "fake_helper.py"
     fake_module_file.write_text("# placeholder")
