@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree
 
+from airflow_local_debug.execution.state import FAILED_TASK_STATES
 from airflow_local_debug.models import RunResult, TaskRunInfo
 
 RunArtifactName = Literal["result", "report", "exception", "graph", "tasks", "junit", "xcom"]
 
-_FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
 _SKIPPED_TASK_STATES = {"skipped", "not_run", "removed"}
 
 
@@ -122,7 +122,7 @@ def _gantt_label(task: TaskRunInfo) -> str:
 
 def _write_junit_xml(result: RunResult, path: Path) -> None:
     total_time = sum(float(task.duration_seconds or 0) for task in result.tasks)
-    failures = sum(1 for task in result.tasks if (task.state or "unknown") in _FAILED_TASK_STATES)
+    failures = sum(1 for task in result.tasks if (task.state or "unknown") in FAILED_TASK_STATES)
     skipped = sum(1 for task in result.tasks if (task.state or "unknown") in _SKIPPED_TASK_STATES)
     suite = ElementTree.Element(
         "testsuite",
@@ -149,7 +149,7 @@ def _write_junit_xml(result: RunResult, path: Path) -> None:
                 "time": f"{float(task.duration_seconds or 0):.6f}",
             },
         )
-        if state in _FAILED_TASK_STATES:
+        if state in FAILED_TASK_STATES:
             failure = ElementTree.SubElement(case, "failure", {"message": f"Task state: {state}", "type": state})
             failure.text = result.exception_raw or result.exception or f"Task {task.task_id} finished in state {state}."
         elif state in _SKIPPED_TASK_STATES:

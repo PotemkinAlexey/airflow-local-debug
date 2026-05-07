@@ -18,6 +18,7 @@ from airflow_local_debug.compat import get_airflow_version
 from airflow_local_debug.execution.mocks import TaskMockRegistry
 from airflow_local_debug.execution.state import (
     FAILED_TASK_STATES,
+    HARD_FAILED_TASK_STATES,
     UNFINISHED_TASK_STATES,
     serialize_datetime,
     state_token,
@@ -124,11 +125,10 @@ def failed_task_label(dagrun: Any) -> str | None:
     if dagrun is None or not hasattr(dagrun, "get_task_instances"):
         return None
 
-    failed_states = {"failed", "up_for_retry", "shutdown"}
     labels = []
     for ti in dagrun.get_task_instances():
         state = str(getattr(ti, "state", None) or "")
-        if state in failed_states:
+        if state in HARD_FAILED_TASK_STATES:
             label = task_instance_label(ti)
             if label:
                 labels.append(label)
@@ -167,7 +167,7 @@ def normalize_task_states_for_backend(
     hard_failed_ids = {
         task.task_id
         for task in task_runs
-        if state_token(task.state) in {"failed", "up_for_retry", "shutdown"}
+        if state_token(task.state) in HARD_FAILED_TASK_STATES
     }
     if not hard_failed_ids:
         return task_runs

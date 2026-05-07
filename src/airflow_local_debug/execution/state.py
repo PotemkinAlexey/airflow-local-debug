@@ -10,6 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
+"""States that mean a task did not succeed for any reason, including upstream failures."""
+
+HARD_FAILED_TASK_STATES = {"failed", "up_for_retry", "shutdown"}
+"""States that mean the task itself broke. Excludes ``upstream_failed`` because
+that state describes a downstream task whose ancestor failed — re-running such
+a task is pointless without first re-running the actual failure source."""
+
 UNFINISHED_TASK_STATES = {
     None,
     "none",

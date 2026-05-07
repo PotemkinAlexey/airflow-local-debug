@@ -21,10 +21,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, Any
 
+from airflow_local_debug.execution.state import HARD_FAILED_TASK_STATES
 from airflow_local_debug.models import RunResult
 
 _WATCH_FILE_SUFFIXES = {".py", ".sql", ".yaml", ".yml", ".json"}
-_FAILED_TASK_STATES = {"failed", "up_for_retry", "shutdown"}
 
 
 def resolve_watch_roots(dag_file: str, extra: Iterable[str] | None = None) -> list[Path]:
@@ -88,7 +88,7 @@ def first_failed_task_id(result: RunResult) -> str | None:
     """Return the first task id whose state indicates a hard failure."""
     for task in result.tasks:
         token = (task.state or "").strip().lower()
-        if token in _FAILED_TASK_STATES:
+        if token in HARD_FAILED_TASK_STATES:
             return task.task_id
     return None
 
@@ -227,7 +227,7 @@ def watch_dag_file(
         output.flush()
         modules_before = set(sys.modules)
         try:
-            result = runner(dag_file, dag_id=dag_id, **kwargs)
+            result: RunResult = runner(dag_file, dag_id=dag_id, **kwargs)
         except KeyboardInterrupt:
             output.write("\n[watch] interrupted\n")
             output.flush()
@@ -256,7 +256,7 @@ def watch_dag_file(
 
         iterations += 1
         if max_iterations is not None and iterations >= max_iterations:
-            return last_result
+            return result
 
         try:
             # Tests inject a custom `sleep`; force polling in that case so
