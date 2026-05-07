@@ -6,6 +6,7 @@ development, reproducible local debugging, and CI smoke checks.
 
 Start here:
 
+- [Feature guide with examples](features.md): practical examples for each major capability.
 - [CLI usage](cli.md): `airflow-debug-run`, `airflow-debug-doctor`, flags, and exit codes.
 - [Library API](library-api.md): importable APIs for DAG code and Python test suites.
 - [Pytest fixture](pytest.md): `airflow_local_runner` fixture for integration tests.

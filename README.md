@@ -24,6 +24,7 @@ package; the exclusion is enforced by the package metadata.
 ## Documentation
 
 - [Documentation index](docs/index.md)
+- [Feature guide with examples](docs/features.md)
 - [CLI usage](docs/cli.md)
 - [Library API](docs/library-api.md)
 - [Pytest fixture](docs/pytest.md)
