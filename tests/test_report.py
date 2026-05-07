@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from xml.etree import ElementTree
 
-from airflow_local_debug.models import RunResult, TaskMockInfo, TaskRunInfo
+from airflow_local_debug.models import DeferrableTaskInfo, RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.report import _format_duration, format_run_report, write_run_artifacts
 
 
@@ -82,6 +82,26 @@ def test_format_run_report_prints_mocked_tasks() -> None:
     assert "- load: success [mocked]" in rendered
 
 
+def test_format_run_report_prints_deferrable_tasks() -> None:
+    result = RunResult(
+        dag_id="demo",
+        state="success",
+        deferrables=[
+            DeferrableTaskInfo(
+                task_id="wait",
+                operator="ExternalTaskSensor",
+                trigger="airflow.triggers.temporal.DateTimeTrigger",
+                local_mode="inline-trigger",
+            )
+        ],
+    )
+
+    rendered = format_run_report(result)
+
+    assert "Deferrable tasks:" in rendered
+    assert "- wait: ExternalTaskSensor trigger=airflow.triggers.temporal.DateTimeTrigger mode=inline-trigger" in rendered
+
+
 def test_format_duration_handles_ranges() -> None:
     assert _format_duration(None) is None
     assert _format_duration(-1) is None
@@ -106,6 +126,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
             TaskRunInfo(task_id="first", state="failed", duration_seconds=2.5),
             TaskRunInfo(task_id="second", state="skipped", duration_seconds=0),
         ],
+        deferrables=[DeferrableTaskInfo(task_id="first", operator="ExternalTaskSensor", local_mode="inline-trigger")],
         xcoms={"first": {"return_value": {"rows": 2}}},
         notes=["note"],
         exception="pretty boom",
@@ -117,6 +138,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert set(artifacts) == {"result", "report", "exception", "graph", "tasks", "junit", "xcom"}
     payload = json.loads(artifacts["result"].read_text(encoding="utf-8"))
     assert payload["dag_id"] == "demo"
+    assert payload["deferrables"][0]["task_id"] == "first"
     assert payload["graph_svg_path"] == "/tmp/graph.svg"
     assert payload["tasks"][0] == {
         "end_date": None,

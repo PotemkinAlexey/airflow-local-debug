@@ -52,6 +52,15 @@ class TaskMockInfo:
 
 
 @dataclass
+class DeferrableTaskInfo:
+    task_id: str
+    operator: str
+    trigger: str | None = None
+    local_mode: str | None = None
+    reason: str | None = None
+
+
+@dataclass
 class DagFileInfo:
     dag_id: str
     task_count: int
@@ -71,6 +80,7 @@ class RunResult:
     graph_svg_path: str | None = None
     tasks: list[TaskRunInfo] = field(default_factory=list)
     mocks: list[TaskMockInfo] = field(default_factory=list)
+    deferrables: list[DeferrableTaskInfo] = field(default_factory=list)
     xcoms: dict[str, dict[str, Any]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     exception: str | None = None

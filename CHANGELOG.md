@@ -14,9 +14,13 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   `--xcom-json-path`.
 - `write_xcom_snapshot()` helper and `xcom.json` report artifact when collected
   XComs exist.
+- Deferrable task detection via `detect_deferrable_tasks()`, `DeferrableTaskInfo`,
+  `RunResult.deferrables`, and final report output that explains the local
+  trigger handling mode.
 
 ### Changed
 - `RunResult` now includes `mocks` and `xcoms`.
+- `RunResult` now includes `deferrables`.
 - `TaskRunInfo` now includes `mocked`.
 - `tasks.csv` now includes a `mocked` column, and the console report marks
   mocked tasks explicitly.

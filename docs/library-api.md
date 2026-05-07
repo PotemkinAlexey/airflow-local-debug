@@ -159,6 +159,23 @@ rules = load_task_mock_rules("./local.mocks.json")
 result = run_full_dag(dag, task_mocks=rules)
 ```
 
+## Deferrable Operators
+
+Use `detect_deferrable_tasks()` when a local tool wants to inspect deferrable
+tasks before running a DAG:
+
+```python
+from airflow_local_debug import detect_deferrable_tasks
+
+for item in detect_deferrable_tasks(dag, backend_hint="dag.test.strict"):
+    print(item.task_id, item.operator, item.local_mode)
+```
+
+`run_full_dag(...)` automatically records the same information in
+`RunResult.deferrables`. If a task instance remains in `deferred` state after
+execution, `RunResult.notes` includes a hint to use default strict mode or task
+mocks.
+
 ## Doctor API
 
 ```python
@@ -194,6 +211,7 @@ raise SystemExit(result.exit_code)
 - `graph_svg_path`
 - `tasks`
 - `mocks`
+- `deferrables`
 - `xcoms`
 - `notes`
 - `exception`
@@ -217,6 +235,14 @@ raise SystemExit(result.exit_code)
 - `mode`
 - `rule_name`
 - `xcom_keys`
+
+`DeferrableTaskInfo` fields:
+
+- `task_id`
+- `operator`
+- `trigger`
+- `local_mode`
+- `reason`
 
 `RunResult.ok` is true only when the run state is `success` and no exception was recorded.
 

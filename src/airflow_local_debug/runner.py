@@ -37,6 +37,7 @@ from airflow_local_debug.compat import (
 )
 from airflow_local_debug.console import print_run_preamble
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
+from airflow_local_debug.deferrables import detect_deferrable_tasks, format_deferrable_note
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph
 from airflow_local_debug.live_trace import live_task_trace
@@ -345,6 +346,7 @@ def _result_from_dagrun(
     exception_raw: str | None = None,
     task_mock_registry: TaskMockRegistry | None = None,
     collect_xcoms: bool = False,
+    deferrables: list[Any] | None = None,
 ) -> RunResult:
     state = getattr(dagrun, "state", None) if dagrun is not None else None
     logical_date = None
@@ -384,13 +386,16 @@ def _result_from_dagrun(
         graph_ascii=graph_ascii,
         tasks=tasks,
         mocks=mock_infos,
+        deferrables=list(deferrables or []),
         xcoms=_extract_xcoms(dagrun, dag) if collect_xcoms else {},
         notes=notes,
         exception=exception,
         exception_raw=exception_raw,
         exception_was_logged=exception_was_logged,
     )
-    return _normalize_result(result)
+    result = _normalize_result(result)
+    _annotate_deferred_result(result)
+    return result
 
 
 def _task_instance_label(ti: Any) -> str | None:
@@ -559,6 +564,18 @@ def _summarize_task_states(task_runs: list[TaskRunInfo], *, limit: int = 5) -> s
     if len(task_runs) > limit:
         chunks.append(f"... +{len(task_runs) - limit} more")
     return ", ".join(chunks)
+
+
+def _annotate_deferred_result(result: RunResult) -> None:
+    deferred_tasks = [task for task in result.tasks if _state_token(task.state) == "deferred"]
+    if not deferred_tasks:
+        return
+
+    result.notes.append(
+        "Deferrable task instance(s) remained deferred in local run: "
+        f"{_summarize_task_states(deferred_tasks)}. "
+        "Use fail_fast=True for strict inline trigger handling, or mock these tasks with --mock-file."
+    )
 
 
 def _normalize_result(result: RunResult) -> RunResult:
@@ -1299,6 +1316,7 @@ def _error_result(
     error_raw: str,
     task_mock_registry: TaskMockRegistry | None = None,
     collect_xcoms: bool = False,
+    deferrables: list[Any] | None = None,
 ) -> RunResult:
     return _result_from_dagrun(
         dag,
@@ -1314,6 +1332,7 @@ def _error_result(
         exception_raw=error_raw,
         task_mock_registry=task_mock_registry,
         collect_xcoms=collect_xcoms,
+        deferrables=deferrables,
     )
 
 
@@ -1341,14 +1360,20 @@ def _execute_full_dag(
     run_logical_date = _coerce_logical_date(logical_date)
     task_mock_rules = list(task_mocks or [])
     graph_ascii = _build_graph_ascii(dag, notes)
+    backend_hint = _backend_hint(dag, fail_fast=fail_fast)
+    deferrables = detect_deferrable_tasks(dag, backend_hint=backend_hint)
+    deferrable_note = format_deferrable_note(deferrables)
+    if deferrable_note:
+        notes.append(deferrable_note)
     run_context = {
         "config_path": config_path,
         "logical_date": _serialize_datetime(run_logical_date),
         "conf": dict(conf or {}),
         "extra_env": dict(extra_env or {}),
-        "backend_hint": _backend_hint(dag, fail_fast=fail_fast),
+        "backend_hint": backend_hint,
         "graph_ascii": graph_ascii,
         "task_mocks": [rule.describe() for rule in task_mock_rules],
+        "deferrables": [info.task_id for info in deferrables],
         "notes": notes,
     }
     plugin_manager = _build_plugin_manager(trace=trace, plugins=plugins, notes=notes)
@@ -1398,6 +1423,7 @@ def _execute_full_dag(
                     backend=backend,
                     task_mock_registry=task_mock_registry,
                     collect_xcoms=collect_xcoms,
+                    deferrables=deferrables,
                 )
                 return result
 
@@ -1422,6 +1448,7 @@ def _execute_full_dag(
                     backend=backend,
                     task_mock_registry=task_mock_registry,
                     collect_xcoms=collect_xcoms,
+                    deferrables=deferrables,
                 )
                 return result
 
@@ -1431,6 +1458,7 @@ def _execute_full_dag(
                 airflow_version=get_airflow_version(),
                 config_path=config_path,
                 graph_ascii=graph_ascii,
+                deferrables=deferrables,
                 notes=notes,
                 exception="This Airflow runtime exposes neither dag.test() nor dag.run().",
                 exception_raw="This Airflow runtime exposes neither dag.test() nor dag.run().",
@@ -1450,6 +1478,7 @@ def _execute_full_dag(
             error_raw=error_raw,
             task_mock_registry=task_mock_registry,
             collect_xcoms=collect_xcoms,
+            deferrables=deferrables,
         )
     except BaseException as exc:
         # SystemExit(0) is a clean shutdown, not a DAG failure — re-raise without
@@ -1470,6 +1499,7 @@ def _execute_full_dag(
                 error_raw=error_raw,
                 task_mock_registry=task_mock_registry,
                 collect_xcoms=collect_xcoms,
+                deferrables=deferrables,
             )
             pending_base_exception = exc
     finally:

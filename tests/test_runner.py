@@ -325,6 +325,16 @@ def test_normalize_result_marks_incomplete_when_only_unfinished() -> None:
     assert out.exception is not None
 
 
+def test_annotate_deferred_result_adds_actionable_note() -> None:
+    result = RunResult(dag_id="demo", tasks=[TaskRunInfo(task_id="wait", state="deferred")])
+
+    runner._annotate_deferred_result(result)
+
+    assert result.notes
+    assert "wait=deferred" in result.notes[0]
+    assert "--mock-file" in result.notes[0]
+
+
 def test_normalize_result_keeps_success_when_all_tasks_done() -> None:
     result = RunResult(
         dag_id="demo",

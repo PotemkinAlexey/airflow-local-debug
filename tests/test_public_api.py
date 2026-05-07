@@ -17,6 +17,8 @@ def test_public_api_exports_core_entrypoints() -> None:
     assert hasattr(airflow_local_debug, "write_run_artifacts")
     assert hasattr(airflow_local_debug, "write_xcom_snapshot")
     assert hasattr(airflow_local_debug, "TaskMockRule")
+    assert hasattr(airflow_local_debug, "DeferrableTaskInfo")
+    assert hasattr(airflow_local_debug, "detect_deferrable_tasks")
     assert hasattr(airflow_local_debug, "load_task_mock_rules")
     assert hasattr(airflow_local_debug, "DagFileInfo")
     assert hasattr(airflow_local_debug, "AirflowDebugPlugin")

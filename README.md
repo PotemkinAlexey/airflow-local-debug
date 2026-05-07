@@ -15,6 +15,7 @@ package; the exclusion is enforced by the package metadata.
 - keeps native Airflow task and XCom behavior
 - can mock selected heavy connector tasks for local runs
 - can dump final XComs as JSON fixtures
+- detects deferrable operators and reports the local trigger handling mode
 - adds deterministic fail-fast execution for debug
 - prints a console DAG graph before execution
 - provides live per-task tracing and structured problem logging
@@ -160,6 +161,12 @@ POOLS = {
 `fail_fast=True` also disables retries on every task for the duration of the
 local run, then restores the original values.
 
+Deferrable tasks are detected before execution. In the default
+`dag.test.strict` backend, the local loop uses inline trigger handling when the
+installed Airflow runtime exposes it. In native `dag.test` / legacy `dag.run`
+mode, the report calls out that provider behavior may still depend on Airflow's
+trigger handling.
+
 ## Task mocks and XCom fixtures
 
 Use task mocks to keep local runs away from real warehouses, notebooks, or
@@ -212,6 +219,7 @@ class RunResult:
     graph_svg_path: str | None
     tasks: list[TaskRunInfo]
     mocks: list[TaskMockInfo]
+    deferrables: list[DeferrableTaskInfo]
     xcoms: dict[str, dict[str, Any]]
     notes: list[str]               # informational messages from bootstrap / plugins
     exception: str | None          # pretty-formatted exception block

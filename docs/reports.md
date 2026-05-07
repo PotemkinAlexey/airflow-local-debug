@@ -15,6 +15,7 @@ The final report includes:
 - graph SVG path when generated
 - notes from bootstrap/plugins
 - mocked task rules when used
+- deferrable task handling when detected
 - task state summary
 - per-task state and duration
 - formatted exception when it was not already logged live
@@ -66,6 +67,7 @@ Important fields:
 - `tasks[].duration_seconds` is present when Airflow exposes `start_date` and `end_date`.
 - `tasks[].mocked` is true when a task was replaced by a local mock rule.
 - `mocks[]` lists applied mock rules.
+- `deferrables[]` lists detected deferrable tasks and the local handling mode.
 - `xcoms` contains the collected XCom snapshot when `--dump-xcom`,
   `--xcom-json-path`, or `collect_xcoms=True` was used.
 

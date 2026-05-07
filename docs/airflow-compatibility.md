@@ -55,6 +55,25 @@ or:
 run_full_dag(dag, fail_fast=False)
 ```
 
+## Deferrable Operators
+
+The runner detects tasks that look deferrable before execution. Detection uses
+common Airflow/provider signals such as `deferrable=True`,
+`start_from_trigger=True`, or `start_trigger_args`.
+
+Detected tasks are included in `RunResult.deferrables`, `result.json`, and the
+console report. The report also records the local handling mode:
+
+| Backend | Deferrable handling |
+|---|---|
+| `dag.test.strict` | Uses strict local loop with inline trigger handling when Airflow exposes it. |
+| `dag.test` | Uses native `dag.test`; behavior may depend on Airflow/provider trigger behavior. |
+| `dag.run` | Legacy path may leave tasks deferred; prefer default fail-fast mode or task mocks. |
+
+If a task instance remains in `deferred` state after a local run, the final
+report adds an actionable note suggesting default `fail_fast=True` or
+`--mock-file` for that task.
+
 ## CI Matrix
 
 The repository CI validates a compatibility matrix across Python and Airflow versions. It also runs a runtime smoke script that checks:

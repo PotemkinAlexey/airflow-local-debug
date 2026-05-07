@@ -120,6 +120,13 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
             xcom_suffix = f" xcom={','.join(mock.xcom_keys)}" if mock.xcom_keys else ""
             lines.append(f"- {mock.task_id}: {mock.mode}{suffix}{xcom_suffix}")
 
+    if result.deferrables:
+        lines.append("Deferrable tasks:")
+        for item in result.deferrables:
+            trigger = f" trigger={item.trigger}" if item.trigger else ""
+            mode = f" mode={item.local_mode}" if item.local_mode else ""
+            lines.append(f"- {item.task_id}: {item.operator}{trigger}{mode}")
+
     if result.tasks:
         state_summary = _task_state_summary(result)
         if state_summary:
