@@ -32,6 +32,16 @@ airflow-debug-run /absolute/path/to/my_dag.py \
   --report-dir ./airflow-debug-report
 ```
 
+Run with local task mocks and an XCom snapshot:
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py \
+  --dag-id my_dag \
+  --mock-file ./local.mocks.json \
+  --dump-xcom \
+  --report-dir ./airflow-debug-report
+```
+
 ### Run Flags
 
 | Flag | Meaning |
@@ -43,6 +53,9 @@ airflow-debug-run /absolute/path/to/my_dag.py \
 | `--conf-json` | JSON object passed as `dag_run.conf`. |
 | `--conf-file` | Path to a JSON object file passed as `dag_run.conf`. |
 | `--env KEY=VALUE` | Extra environment variable for this run. May be repeated. |
+| `--mock-file` | JSON/YAML task mock file. May be repeated. |
+| `--dump-xcom` | Collect final XComs into `result.json` and `xcom.json` artifacts. |
+| `--xcom-json-path` | Write final XCom snapshot to an explicit JSON path. |
 | `--no-trace` | Disable live per-task console tracing. |
 | `--no-fail-fast` | Keep original retries instead of forcing fail-fast debug mode. |
 | `--include-graph-in-report` | Include the ASCII DAG graph in the final report. |
@@ -50,6 +63,54 @@ airflow-debug-run /absolute/path/to/my_dag.py \
 | `--graph-svg-path` | Write the rendered DAG graph SVG to an explicit path. Defaults to `graph.svg` inside `--report-dir`. |
 
 `--conf-json` and `--conf-file` are mutually exclusive. The conf payload must be a JSON object.
+
+### Task Mocks
+
+`--mock-file` lets a local run replace selected task `execute()` calls with a
+successful local stub. The runner still creates real task instances, marks them
+through Airflow, and pushes configured XCom values. Mocked tasks are visible in
+the console report, `result.json`, and `tasks.csv`.
+
+Example `local.mocks.json`:
+
+```json
+{
+  "mocks": [
+    {
+      "name": "snowflake load fixture",
+      "task_id": "load_to_snowflake",
+      "xcom": {
+        "return_value": {
+          "rows_loaded": 120,
+          "table": "analytics.events"
+        }
+      }
+    },
+    {
+      "operator": "DatabricksSubmitRunOperator",
+      "return_value": {
+        "run_id": "local-mock-run"
+      }
+    }
+  ]
+}
+```
+
+Supported selectors:
+
+- `task_id`
+- `task_id_glob`
+- `operator` (class name, `task_type`, or full module path)
+- `operator_glob`
+
+Rules are required by default: if a rule matches no task, the run fails before
+execution. Set `"required": false` for optional mocks.
+
+### XCom Dumps
+
+Use `--dump-xcom` with `--report-dir` to write `xcom.json` when XComs exist.
+Use `--xcom-json-path /tmp/xcom.json` when you want a standalone fixture file.
+The same snapshot is also available as `RunResult.xcoms`.
 
 ### Exit Codes
 

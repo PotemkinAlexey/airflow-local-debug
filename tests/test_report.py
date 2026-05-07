@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from xml.etree import ElementTree
 
-from airflow_local_debug.models import RunResult, TaskRunInfo
+from airflow_local_debug.models import RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.report import _format_duration, format_run_report, write_run_artifacts
 
 
@@ -67,6 +67,21 @@ def test_format_run_report_prints_task_summary_and_durations() -> None:
     assert "- cleanup: unknown (123ms)" in rendered
 
 
+def test_format_run_report_prints_mocked_tasks() -> None:
+    result = RunResult(
+        dag_id="demo",
+        state="success",
+        tasks=[TaskRunInfo(task_id="load", state="success", mocked=True)],
+        mocks=[TaskMockInfo(task_id="load", mode="success", rule_name="local load", xcom_keys=["return_value"])],
+    )
+
+    rendered = format_run_report(result)
+
+    assert "Mocked tasks:" in rendered
+    assert "- load: success via local load xcom=return_value" in rendered
+    assert "- load: success [mocked]" in rendered
+
+
 def test_format_duration_handles_ranges() -> None:
     assert _format_duration(None) is None
     assert _format_duration(-1) is None
@@ -91,6 +106,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
             TaskRunInfo(task_id="first", state="failed", duration_seconds=2.5),
             TaskRunInfo(task_id="second", state="skipped", duration_seconds=0),
         ],
+        xcoms={"first": {"return_value": {"rows": 2}}},
         notes=["note"],
         exception="pretty boom",
         exception_raw="Traceback\nboom",
@@ -98,7 +114,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
 
     artifacts = write_run_artifacts(result, tmp_path / "report", include_graph=False)
 
-    assert set(artifacts) == {"result", "report", "exception", "graph", "tasks", "junit"}
+    assert set(artifacts) == {"result", "report", "exception", "graph", "tasks", "junit", "xcom"}
     payload = json.loads(artifacts["result"].read_text(encoding="utf-8"))
     assert payload["dag_id"] == "demo"
     assert payload["graph_svg_path"] == "/tmp/graph.svg"
@@ -106,6 +122,7 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
         "end_date": None,
         "duration_seconds": 2.5,
         "map_index": None,
+        "mocked": False,
         "start_date": None,
         "state": "failed",
         "task_id": "first",
@@ -116,10 +133,11 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert artifacts["exception"].read_text(encoding="utf-8") == "Traceback\nboom\n"
     assert artifacts["graph"].read_text(encoding="utf-8") == "demo\n  first -> second\n"
     assert artifacts["tasks"].read_text(encoding="utf-8").splitlines() == [
-        "task_id,map_index,state,try_number,start_date,end_date,duration_seconds",
-        "first,,failed,,,,2.5",
-        "second,,skipped,,,,0",
+        "task_id,map_index,state,try_number,start_date,end_date,duration_seconds,mocked",
+        "first,,failed,,,,2.5,false",
+        "second,,skipped,,,,0,false",
     ]
+    assert json.loads(artifacts["xcom"].read_text(encoding="utf-8")) == {"first": {"return_value": {"rows": 2}}}
 
     suite = ElementTree.parse(artifacts["junit"]).getroot()
     assert suite.tag == "testsuite"

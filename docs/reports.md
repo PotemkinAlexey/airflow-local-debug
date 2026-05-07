@@ -14,6 +14,7 @@ The final report includes:
 - config path
 - graph SVG path when generated
 - notes from bootstrap/plugins
+- mocked task rules when used
 - task state summary
 - per-task state and duration
 - formatted exception when it was not already logged live
@@ -49,6 +50,7 @@ Artifacts:
 | `result.json` | always | Complete structured `RunResult`. |
 | `tasks.csv` | when tasks exist | Flat task table with state, try number, dates, and duration. |
 | `junit.xml` | when tasks exist | CI test report, one testcase per Airflow task. |
+| `xcom.json` | when XComs are collected and exist | Final XCom snapshot grouped by task label and key. |
 | `graph.svg` | when `--report-dir` is used unless overridden | Visual DAG graph. |
 | `graph.txt` | when ASCII graph exists | Console DAG graph. |
 | `exception.txt` | when an exception exists | Raw traceback when available, otherwise formatted exception text. |
@@ -62,6 +64,10 @@ Important fields:
 - `ok` is not serialized as a field because it is a property. Use `state == "success"` and `exception is null`.
 - `state` is normalized to lowercase.
 - `tasks[].duration_seconds` is present when Airflow exposes `start_date` and `end_date`.
+- `tasks[].mocked` is true when a task was replaced by a local mock rule.
+- `mocks[]` lists applied mock rules.
+- `xcoms` contains the collected XCom snapshot when `--dump-xcom`,
+  `--xcom-json-path`, or `collect_xcoms=True` was used.
 
 ## `tasks.csv`
 
@@ -74,8 +80,29 @@ Columns:
 - `start_date`
 - `end_date`
 - `duration_seconds`
+- `mocked`
 
 This is intended for spreadsheets, CI artifacts, and quick local timing comparisons.
+
+## `xcom.json`
+
+The XCom dump groups values by task label:
+
+```json
+{
+  "load_to_snowflake": {
+    "return_value": {
+      "rows_loaded": 120
+    }
+  },
+  "mapped_task[2]": {
+    "return_value": "ok"
+  }
+}
+```
+
+Values are normalized to JSON-safe shapes. Datetime-like values are serialized
+with `isoformat()`; unknown object types fall back to `str(value)`.
 
 ## `junit.xml`
 

@@ -23,6 +23,7 @@ import json
 import logging
 import sys
 import traceback
+import warnings
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
@@ -39,6 +40,7 @@ from airflow_local_debug.config_loader import get_default_config_path, load_loca
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph
 from airflow_local_debug.live_trace import live_task_trace
+from airflow_local_debug.mocks import TaskMockRegistry, TaskMockRule, load_task_mock_rules, local_task_mocks
 from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo, normalize_state
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
@@ -149,23 +151,63 @@ def _load_cli_extra_env(values: list[str] | None) -> dict[str, str]:
     return extra_env
 
 
-def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
+def _load_cli_task_mocks(values: list[str] | None) -> list[TaskMockRule]:
+    rules: list[TaskMockRule] = []
+    for value in values or []:
+        rules.extend(load_task_mock_rules(value))
+    return rules
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _task_xcom_label(task_id: str, map_index: int | None) -> str:
+    if map_index is not None and map_index >= 0:
+        return f"{task_id}[{map_index}]"
+    return task_id
+
+
+def _extract_task_runs(
+    dagrun: Any,
+    dag: Any,
+    *,
+    mocked_task_ids: set[str] | None = None,
+) -> list[TaskRunInfo]:
     if dagrun is None or not hasattr(dagrun, "get_task_instances"):
         return []
 
+    mocked_task_ids = mocked_task_ids or set()
     task_runs: list[TaskRunInfo] = []
     for ti in dagrun.get_task_instances():
         start_date = getattr(ti, "start_date", None)
         end_date = getattr(ti, "end_date", None)
+        task_id = getattr(ti, "task_id", "<unknown>")
         task_runs.append(
             TaskRunInfo(
-                task_id=getattr(ti, "task_id", "<unknown>"),
+                task_id=task_id,
                 state=normalize_state(getattr(ti, "state", None)),
                 try_number=getattr(ti, "try_number", None),
                 map_index=getattr(ti, "map_index", None),
                 start_date=_serialize_datetime(start_date),
                 end_date=_serialize_datetime(end_date),
                 duration_seconds=_duration_seconds(start_date, end_date),
+                mocked=task_id in mocked_task_ids,
             )
         )
 
@@ -178,6 +220,73 @@ def _extract_task_runs(dagrun: Any, dag: Any) -> list[TaskRunInfo]:
         )
     )
     return task_runs
+
+
+def _extract_xcoms(dagrun: Any, dag: Any) -> dict[str, dict[str, Any]]:
+    if dagrun is None:
+        return {}
+
+    snapshot = _query_xcoms(dagrun, dag)
+    fallback = _fallback_return_xcoms(dagrun)
+    for task_label, values in fallback.items():
+        snapshot.setdefault(task_label, {}).update(
+            {key: value for key, value in values.items() if key not in snapshot.get(task_label, {})}
+        )
+    return snapshot
+
+
+def _query_xcoms(dagrun: Any, dag: Any) -> dict[str, dict[str, Any]]:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            from airflow.models.xcom import XCom
+        from airflow.utils.session import create_session
+    except Exception as exc:
+        _log.debug("XCom query unavailable: %s", exc, exc_info=True)
+        return {}
+
+    dag_id = getattr(dagrun, "dag_id", None) or getattr(dag, "dag_id", None)
+    run_id = getattr(dagrun, "run_id", None)
+    logical_date = getattr(dagrun, "logical_date", None) or getattr(dagrun, "execution_date", None)
+    if dag_id is None:
+        return {}
+
+    try:
+        with create_session() as session:
+            query = session.query(XCom).filter(XCom.dag_id == dag_id)
+            if run_id is not None and hasattr(XCom, "run_id"):
+                query = query.filter(XCom.run_id == run_id)
+            elif logical_date is not None and hasattr(XCom, "execution_date"):
+                query = query.filter(XCom.execution_date == logical_date)
+            else:
+                return {}
+            rows = list(query.all())
+    except Exception as exc:
+        _log.debug("XCom query failed for %s: %s", dag_id, exc, exc_info=True)
+        return {}
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        task_id = str(getattr(row, "task_id", "<unknown>"))
+        map_index = getattr(row, "map_index", None)
+        key = str(getattr(row, "key", "return_value"))
+        snapshot.setdefault(_task_xcom_label(task_id, map_index), {})[key] = _json_safe(getattr(row, "value", None))
+    return snapshot
+
+
+def _fallback_return_xcoms(dagrun: Any) -> dict[str, dict[str, Any]]:
+    if not hasattr(dagrun, "get_task_instances"):
+        return {}
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for ti in dagrun.get_task_instances():
+        value = _best_effort_task_result(ti)
+        if value is None:
+            continue
+        task_id = str(getattr(ti, "task_id", "<unknown>"))
+        map_index = getattr(ti, "map_index", None)
+        snapshot[_task_xcom_label(task_id, map_index)] = {"return_value": _json_safe(value)}
+    return snapshot
 
 
 def _best_effort_last_dagrun(dag: Any) -> Any | None:
@@ -234,11 +343,15 @@ def _result_from_dagrun(
     backend: str | None = None,
     exception: str | None = None,
     exception_raw: str | None = None,
+    task_mock_registry: TaskMockRegistry | None = None,
+    collect_xcoms: bool = False,
 ) -> RunResult:
     state = getattr(dagrun, "state", None) if dagrun is not None else None
     logical_date = None
     exception_was_logged = False
-    tasks = _extract_task_runs(dagrun, dag)
+    mocked_task_ids = task_mock_registry.mocked_task_ids if task_mock_registry is not None else set()
+    mock_infos = task_mock_registry.mock_infos if task_mock_registry is not None else []
+    tasks = _extract_task_runs(dagrun, dag, mocked_task_ids=mocked_task_ids)
     tasks = _normalize_task_states_for_backend(dag, tasks, backend=backend)
     if exception is None and dagrun is not None:
         local_exc = getattr(dagrun, "_airflow_debug_local_exception", None)
@@ -270,6 +383,8 @@ def _result_from_dagrun(
         config_path=config_path,
         graph_ascii=graph_ascii,
         tasks=tasks,
+        mocks=mock_infos,
+        xcoms=_extract_xcoms(dagrun, dag) if collect_xcoms else {},
         notes=notes,
         exception=exception,
         exception_raw=exception_raw,
@@ -411,6 +526,7 @@ def _normalize_task_states_for_backend(
                         start_date=task.start_date,
                         end_date=task.end_date,
                         duration_seconds=task.duration_seconds,
+                        mocked=task.mocked,
                     )
                 )
             else:
@@ -423,6 +539,7 @@ def _normalize_task_states_for_backend(
                         start_date=task.start_date,
                         end_date=task.end_date,
                         duration_seconds=task.duration_seconds,
+                        mocked=task.mocked,
                     )
                 )
             continue
@@ -1180,6 +1297,8 @@ def _error_result(
     backend: str | None,
     exc: BaseException,
     error_raw: str,
+    task_mock_registry: TaskMockRegistry | None = None,
+    collect_xcoms: bool = False,
 ) -> RunResult:
     return _result_from_dagrun(
         dag,
@@ -1193,6 +1312,8 @@ def _error_result(
             task_id=_failed_task_label(dagrun) or getattr(dag, "dag_id", None),
         ),
         exception_raw=error_raw,
+        task_mock_registry=task_mock_registry,
+        collect_xcoms=collect_xcoms,
     )
 
 
@@ -1207,6 +1328,8 @@ def _execute_full_dag(
     trace: bool,
     fail_fast: bool,
     plugins: Iterable[AirflowDebugPlugin] | None,
+    task_mocks: Iterable[TaskMockRule] | None,
+    collect_xcoms: bool,
     notes: list[str],
     graph_svg_path: str | Path | None = None,
 ) -> RunResult:
@@ -1214,7 +1337,9 @@ def _execute_full_dag(
     dagrun = None
     result: RunResult | None = None
     pending_base_exception: BaseException | None = None
+    task_mock_registry: TaskMockRegistry | None = None
     run_logical_date = _coerce_logical_date(logical_date)
+    task_mock_rules = list(task_mocks or [])
     graph_ascii = _build_graph_ascii(dag, notes)
     run_context = {
         "config_path": config_path,
@@ -1223,6 +1348,7 @@ def _execute_full_dag(
         "extra_env": dict(extra_env or {}),
         "backend_hint": _backend_hint(dag, fail_fast=fail_fast),
         "graph_ascii": graph_ascii,
+        "task_mocks": [rule.describe() for rule in task_mock_rules],
         "notes": notes,
     }
     plugin_manager = _build_plugin_manager(trace=trace, plugins=plugins, notes=notes)
@@ -1239,7 +1365,11 @@ def _execute_full_dag(
             dag,
             fail_fast=fail_fast,
             notes=notes,
-        ), live_task_trace(
+        ), local_task_mocks(
+            dag,
+            task_mock_rules,
+            notes=notes,
+        ) as task_mock_registry, live_task_trace(
             dag,
             plugin_manager=plugin_manager,
             wrap_task_methods=not fail_fast,
@@ -1266,6 +1396,8 @@ def _execute_full_dag(
                     notes=notes,
                     graph_ascii=graph_ascii,
                     backend=backend,
+                    task_mock_registry=task_mock_registry,
+                    collect_xcoms=collect_xcoms,
                 )
                 return result
 
@@ -1288,6 +1420,8 @@ def _execute_full_dag(
                     notes=notes,
                     graph_ascii=graph_ascii,
                     backend=backend,
+                    task_mock_registry=task_mock_registry,
+                    collect_xcoms=collect_xcoms,
                 )
                 return result
 
@@ -1314,6 +1448,8 @@ def _execute_full_dag(
             backend=backend,
             exc=exc,
             error_raw=error_raw,
+            task_mock_registry=task_mock_registry,
+            collect_xcoms=collect_xcoms,
         )
     except BaseException as exc:
         # SystemExit(0) is a clean shutdown, not a DAG failure — re-raise without
@@ -1332,6 +1468,8 @@ def _execute_full_dag(
                 backend=backend,
                 exc=exc,
                 error_raw=error_raw,
+                task_mock_registry=task_mock_registry,
+                collect_xcoms=collect_xcoms,
             )
             pending_base_exception = exc
     finally:
@@ -1464,6 +1602,8 @@ def run_full_dag(
     trace: bool = True,
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
+    task_mocks: Iterable[TaskMockRule] | None = None,
+    collect_xcoms: bool = False,
 ) -> RunResult:
     """
     Run an ordinary Airflow DAG end-to-end in the current Python process.
@@ -1508,6 +1648,8 @@ def run_full_dag(
         trace=trace,
         fail_fast=fail_fast,
         plugins=plugins,
+        task_mocks=task_mocks,
+        collect_xcoms=collect_xcoms,
         notes=notes,
         graph_svg_path=graph_svg_path,
     )
@@ -1525,8 +1667,11 @@ def debug_dag(
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
     report_dir: str | Path | None = None,
+    xcom_json_path: str | Path | None = None,
+    collect_xcoms: bool = False,
     raise_on_failure: bool = True,
     fail_fast: bool = True,
+    task_mocks: Iterable[TaskMockRule] | None = None,
 ) -> RunResult:
     """
     Run a DAG locally and immediately print the standard final report.
@@ -1547,7 +1692,14 @@ def debug_dag(
         trace=trace,
         fail_fast=fail_fast,
         plugins=plugins,
+        task_mocks=task_mocks,
+        collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
+    if xcom_json_path is not None:
+        from airflow_local_debug.report import write_xcom_snapshot
+
+        xcom_path = write_xcom_snapshot(result, xcom_json_path)
+        result.notes.append(f"Wrote XCom snapshot to {xcom_path}")
     if report_dir is not None:
         _write_report_artifacts(result, report_dir, include_graph=include_graph_in_report)
     print_run_report(result, include_graph=include_graph_in_report)
@@ -1598,6 +1750,22 @@ def debug_dag_cli(
         help="Extra environment variable for this local run; may be passed multiple times.",
     )
     parser.add_argument(
+        "--mock-file",
+        dest="mock_file",
+        action="append",
+        help="JSON/YAML task mock file. May be passed multiple times.",
+    )
+    parser.add_argument(
+        "--dump-xcom",
+        action="store_true",
+        help="Collect final XComs into result.json and xcom.json artifacts.",
+    )
+    parser.add_argument(
+        "--xcom-json-path",
+        dest="xcom_json_path",
+        help="Write final XCom snapshot to an explicit JSON path.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1635,6 +1803,10 @@ def debug_dag_cli(
         cli_extra_env = _load_cli_extra_env(args.env)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        task_mocks = _load_cli_task_mocks(args.mock_file)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if conf is None:
         conf = kwargs.pop("conf", None)
@@ -1643,6 +1815,13 @@ def debug_dag_cli(
     programmatic_extra_env = kwargs.pop("extra_env", None)
     extra_env = dict(programmatic_extra_env or {})
     extra_env.update(cli_extra_env)
+    if task_mocks:
+        kwargs.pop("task_mocks", None)
+    else:
+        task_mocks = kwargs.pop("task_mocks", None)
+    programmatic_collect_xcoms = bool(kwargs.pop("collect_xcoms", False))
+    programmatic_xcom_json_path = kwargs.pop("xcom_json_path", None)
+    xcom_json_path = args.xcom_json_path or programmatic_xcom_json_path
 
     return debug_dag(
         dag,
@@ -1655,6 +1834,9 @@ def debug_dag_cli(
         include_graph_in_report=args.include_graph_in_report,
         report_dir=args.report_dir,
         graph_svg_path=args.graph_svg_path,
+        task_mocks=task_mocks,
+        collect_xcoms=programmatic_collect_xcoms or args.dump_xcom or xcom_json_path is not None,
+        xcom_json_path=xcom_json_path,
         **kwargs,
     )
 
@@ -1709,6 +1891,22 @@ def debug_dag_file_cli(
         help="Extra environment variable for this local run; may be passed multiple times.",
     )
     parser.add_argument(
+        "--mock-file",
+        dest="mock_file",
+        action="append",
+        help="JSON/YAML task mock file. May be passed multiple times.",
+    )
+    parser.add_argument(
+        "--dump-xcom",
+        action="store_true",
+        help="Collect final XComs into result.json and xcom.json artifacts.",
+    )
+    parser.add_argument(
+        "--xcom-json-path",
+        dest="xcom_json_path",
+        help="Write final XCom snapshot to an explicit JSON path.",
+    )
+    parser.add_argument(
         "--no-trace",
         action="store_true",
         help="Disable live per-task console tracing.",
@@ -1737,6 +1935,10 @@ def debug_dag_file_cli(
 
     try:
         extra_env = _load_cli_extra_env(args.env)
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        task_mocks = _load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -1774,6 +1976,9 @@ def debug_dag_file_cli(
         include_graph_in_report=args.include_graph_in_report,
         report_dir=args.report_dir,
         graph_svg_path=args.graph_svg_path,
+        task_mocks=task_mocks,
+        collect_xcoms=args.dump_xcom or args.xcom_json_path is not None,
+        xcom_json_path=args.xcom_json_path,
     )
 
 
@@ -1789,6 +1994,8 @@ def run_full_dag_from_file(
     trace: bool = True,
     fail_fast: bool = True,
     plugins: Iterable[AirflowDebugPlugin] | None = None,
+    task_mocks: Iterable[TaskMockRule] | None = None,
+    collect_xcoms: bool = False,
 ) -> RunResult:
     """
     Import a normal Airflow DAG file and run the entire DAG.
@@ -1820,6 +2027,8 @@ def run_full_dag_from_file(
                 trace=trace,
                 fail_fast=fail_fast,
                 plugins=plugins,
+                task_mocks=task_mocks,
+                collect_xcoms=collect_xcoms,
                 notes=notes,
                 graph_svg_path=graph_svg_path,
             )
@@ -1847,8 +2056,11 @@ def debug_dag_from_file(
     plugins: Iterable[AirflowDebugPlugin] | None = None,
     include_graph_in_report: bool = False,
     report_dir: str | Path | None = None,
+    xcom_json_path: str | Path | None = None,
+    collect_xcoms: bool = False,
     raise_on_failure: bool = True,
     fail_fast: bool = True,
+    task_mocks: Iterable[TaskMockRule] | None = None,
 ) -> RunResult:
     """
     Import a DAG file, run it locally, and immediately print the standard report.
@@ -1869,7 +2081,14 @@ def debug_dag_from_file(
         trace=trace,
         fail_fast=fail_fast,
         plugins=plugins,
+        task_mocks=task_mocks,
+        collect_xcoms=collect_xcoms or xcom_json_path is not None,
     )
+    if xcom_json_path is not None:
+        from airflow_local_debug.report import write_xcom_snapshot
+
+        xcom_path = write_xcom_snapshot(result, xcom_json_path)
+        result.notes.append(f"Wrote XCom snapshot to {xcom_path}")
     if report_dir is not None:
         _write_report_artifacts(result, report_dir, include_graph=include_graph_in_report)
     print_run_report(result, include_graph=include_graph_in_report)

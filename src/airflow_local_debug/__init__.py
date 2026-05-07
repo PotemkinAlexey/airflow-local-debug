@@ -70,7 +70,8 @@ from airflow_local_debug.config_loader import get_default_config_path, load_loca
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
 from airflow_local_debug.live_trace import live_task_trace
-from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo
+from airflow_local_debug.mocks import TaskMockRule, load_task_mock_rules, task_mock_rules_from_payload
+from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
     ConsoleTracePlugin,
@@ -79,7 +80,7 @@ from airflow_local_debug.plugins import (
     RepeatedProblemWarningError,
     TaskContextPlugin,
 )
-from airflow_local_debug.report import format_run_report, print_run_report, write_run_artifacts
+from airflow_local_debug.report import format_run_report, print_run_report, write_run_artifacts, write_xcom_snapshot
 from airflow_local_debug.runner import (
     debug_dag,
     debug_dag_cli,
@@ -163,7 +164,12 @@ __all__ = [
     "StepTracer",
     "StepTracerOptions",
     "TaskContextPlugin",
+    "TaskMockInfo",
+    "TaskMockRule",
     "TaskRunInfo",
+    "load_task_mock_rules",
+    "task_mock_rules_from_payload",
     "write_dag_svg",
     "write_run_artifacts",
+    "write_xcom_snapshot",
 ]

@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 from airflow_local_debug.models import RunResult
 
-RunArtifactName = Literal["result", "report", "exception", "graph", "tasks", "junit"]
+RunArtifactName = Literal["result", "report", "exception", "graph", "tasks", "junit", "xcom"]
 
 _FAILED_TASK_STATES = {"failed", "up_for_retry", "upstream_failed", "shutdown"}
 _SKIPPED_TASK_STATES = {"skipped", "not_run", "removed"}
@@ -113,6 +113,13 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
         for note in result.notes:
             lines.append(f"- {note}")
 
+    if result.mocks:
+        lines.append("Mocked tasks:")
+        for mock in result.mocks:
+            suffix = f" via {mock.rule_name}" if mock.rule_name else ""
+            xcom_suffix = f" xcom={','.join(mock.xcom_keys)}" if mock.xcom_keys else ""
+            lines.append(f"- {mock.task_id}: {mock.mode}{suffix}{xcom_suffix}")
+
     if result.tasks:
         state_summary = _task_state_summary(result)
         if state_summary:
@@ -124,7 +131,8 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
                 map_suffix = f"[{task.map_index}]"
             duration = _format_duration(task.duration_seconds)
             duration_suffix = f" ({duration})" if duration else ""
-            lines.append(f"- {task.task_id}{map_suffix}: {task.state or 'unknown'}{duration_suffix}")
+            mock_suffix = " [mocked]" if task.mocked else ""
+            lines.append(f"- {task.task_id}{map_suffix}: {task.state or 'unknown'}{duration_suffix}{mock_suffix}")
 
     if result.exception and not result.exception_was_logged:
         lines.append("Exception:")
@@ -187,6 +195,7 @@ def write_run_artifacts(
                     "start_date",
                     "end_date",
                     "duration_seconds",
+                    "mocked",
                 ],
             )
             writer.writeheader()
@@ -200,6 +209,7 @@ def write_run_artifacts(
                         "start_date": task.start_date or "",
                         "end_date": task.end_date or "",
                         "duration_seconds": "" if task.duration_seconds is None else task.duration_seconds,
+                        "mocked": "true" if task.mocked else "false",
                     }
                 )
         artifacts["tasks"] = tasks_path
@@ -208,4 +218,18 @@ def write_run_artifacts(
         _write_junit_xml(result, junit_path)
         artifacts["junit"] = junit_path
 
+    if result.xcoms:
+        artifacts["xcom"] = write_xcom_snapshot(result, target_dir / "xcom.json")
+
     return artifacts
+
+
+def write_xcom_snapshot(result: RunResult, path: str | Path) -> Path:
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target = target.resolve()
+    target.write_text(
+        json.dumps(result.xcoms, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return target

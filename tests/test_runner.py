@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from airflow_local_debug import runner
+from airflow_local_debug.mocks import TaskMockRule
 from airflow_local_debug.models import DagFileInfo, RunResult, TaskRunInfo
 
 
@@ -201,6 +202,15 @@ def test_extract_task_runs_records_duration() -> None:
     assert tasks[0].start_date == "2026-01-01T12:00:00"
     assert tasks[0].end_date == "2026-01-01T12:00:02"
     assert tasks[0].duration_seconds == 2.0
+
+
+def test_extract_task_runs_marks_mocked_tasks() -> None:
+    dagrun = FakeDagrun([FakeTI(task_id="load", state="success")])
+    dag = FakeDag(task_dict={"load": FakeTask("load")})
+
+    tasks = runner._extract_task_runs(dagrun, dag, mocked_task_ids={"load"})
+
+    assert tasks[0].mocked is True
 
 
 # --- _task_instance_label -------------------------------------------------
@@ -501,6 +511,34 @@ def test_debug_dag_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) -> None
     assert captured["extra_env"] == {"FOO": "bar", "KEEP": "yes", "BAZ": "qux"}
 
 
+def test_debug_dag_cli_passes_task_mocks_and_xcom_flags(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+    mock_file = tmp_path / "mocks.json"
+    mock_file.write_text('[{"task_id": "load", "return_value": {"rows": 3}}]', encoding="utf-8")
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=[
+            "--mock-file",
+            str(mock_file),
+            "--dump-xcom",
+            "--xcom-json-path",
+            str(tmp_path / "xcom.json"),
+        ],
+    )
+
+    assert result.ok
+    assert captured["task_mocks"] == [TaskMockRule(task_id="load", xcom={"return_value": {"rows": 3}})]
+    assert captured["collect_xcoms"] is True
+    assert captured["xcom_json_path"] == str(tmp_path / "xcom.json")
+
+
 def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     captured: dict[str, Any] = {}
 
@@ -611,3 +649,22 @@ def test_debug_dag_file_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.ok
     assert captured["extra_env"] == {"FOO": "bar"}
+
+
+def test_debug_dag_file_cli_passes_task_mocks(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, Any] = {}
+    mock_file = tmp_path / "mocks.json"
+    mock_file.write_text('[{"task_id_glob": "load_*"}]', encoding="utf-8")
+
+    def fake_debug_dag_from_file(dag_file: str, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag_from_file", fake_debug_dag_from_file)
+
+    result = runner.debug_dag_file_cli(
+        argv=["/tmp/demo_dag.py", "--mock-file", str(mock_file)],
+    )
+
+    assert result.ok
+    assert captured["task_mocks"] == [TaskMockRule(task_id_glob="load_*")]

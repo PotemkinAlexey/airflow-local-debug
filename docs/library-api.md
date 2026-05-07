@@ -86,6 +86,13 @@ result = run_full_dag(
 assert result.ok, result.exception
 ```
 
+Collect XComs for pytest fixtures:
+
+```python
+result = run_full_dag(dag, collect_xcoms=True)
+assert result.xcoms["load_to_warehouse"]["return_value"]["rows_loaded"] == 120
+```
+
 ### `run_full_dag_from_file`
 
 `run_full_dag_from_file` imports a DAG file after applying local environment bootstrap:
@@ -116,6 +123,41 @@ Each `DagFileInfo` contains:
 - `dag_id`
 - `task_count`
 - `fileloc`
+
+## Task Mocks
+
+Use task mocks when local debug should validate orchestration and XCom contracts
+without calling a heavy external connector.
+
+```python
+from airflow_local_debug import TaskMockRule, run_full_dag
+
+result = run_full_dag(
+    dag,
+    task_mocks=[
+        TaskMockRule(
+            task_id="load_to_snowflake",
+            name="warehouse fixture",
+            xcom={"return_value": {"rows_loaded": 120}},
+        )
+    ],
+    collect_xcoms=True,
+)
+```
+
+Rules can match by exact `task_id`, `task_id_glob`, exact `operator`, or
+`operator_glob`. `operator` matches the task class name, Airflow `task_type`,
+or full module path. A required rule that matches no task fails the run before
+execution; set `required=False` for optional local rules.
+
+For file-driven configs:
+
+```python
+from airflow_local_debug import load_task_mock_rules, run_full_dag
+
+rules = load_task_mock_rules("./local.mocks.json")
+result = run_full_dag(dag, task_mocks=rules)
+```
 
 ## Doctor API
 
@@ -151,6 +193,8 @@ raise SystemExit(result.exit_code)
 - `graph_ascii`
 - `graph_svg_path`
 - `tasks`
+- `mocks`
+- `xcoms`
 - `notes`
 - `exception`
 - `exception_raw`
@@ -165,6 +209,14 @@ raise SystemExit(result.exit_code)
 - `start_date`
 - `end_date`
 - `duration_seconds`
+- `mocked`
+
+`TaskMockInfo` fields:
+
+- `task_id`
+- `mode`
+- `rule_name`
+- `xcom_keys`
 
 `RunResult.ok` is true only when the run state is `success` and no exception was recorded.
 

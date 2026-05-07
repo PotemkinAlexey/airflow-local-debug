@@ -13,6 +13,8 @@ package; the exclusion is enforced by the package metadata.
 
 - runs a full DAG locally without scheduler/webserver
 - keeps native Airflow task and XCom behavior
+- can mock selected heavy connector tasks for local runs
+- can dump final XComs as JSON fixtures
 - adds deterministic fail-fast execution for debug
 - prints a console DAG graph before execution
 - provides live per-task tracing and structured problem logging
@@ -80,6 +82,9 @@ CLI flags (both entrypoints):
 | `--conf-json` | JSON object to pass as `dag_run.conf` |
 | `--conf-file` | Path to a JSON object file to pass as `dag_run.conf` |
 | `--env` | Extra `KEY=VALUE` environment variable for this run; repeatable |
+| `--mock-file` | JSON/YAML task mock file; repeatable |
+| `--dump-xcom` | Collect final XComs into `result.json` and `xcom.json` artifacts |
+| `--xcom-json-path` | Write final XCom snapshot to an explicit JSON path |
 | `--no-trace` | Disable live per-task console tracing |
 | `--no-fail-fast` | Keep original retries (default disables them) |
 | `--include-graph-in-report` | Include the DAG graph in the final report |
@@ -155,6 +160,40 @@ POOLS = {
 `fail_fast=True` also disables retries on every task for the duration of the
 local run, then restores the original values.
 
+## Task mocks and XCom fixtures
+
+Use task mocks to keep local runs away from real warehouses, notebooks, or
+expensive APIs while still exercising graph flow and XCom contracts.
+
+```json
+{
+  "mocks": [
+    {
+      "task_id": "load_to_snowflake",
+      "xcom": {
+        "return_value": {
+          "rows_loaded": 120,
+          "table": "analytics.events"
+        }
+      }
+    }
+  ]
+}
+```
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py \
+  --dag-id my_dag \
+  --mock-file ./local.mocks.json \
+  --dump-xcom \
+  --report-dir ./airflow-debug-report
+```
+
+Rules can match by `task_id`, `task_id_glob`, `operator`, or `operator_glob`.
+Mocked tasks are called out in the report and get `tasks[].mocked=true` in
+`result.json`. `--dump-xcom` writes collected XComs to `RunResult.xcoms` and
+`xcom.json` when `--report-dir` is used.
+
 ## Result object
 
 `run_full_dag(...)` and `run_full_dag_from_file(...)` return a `RunResult`:
@@ -172,6 +211,8 @@ class RunResult:
     graph_ascii: str | None
     graph_svg_path: str | None
     tasks: list[TaskRunInfo]
+    mocks: list[TaskMockInfo]
+    xcoms: dict[str, dict[str, Any]]
     notes: list[str]               # informational messages from bootstrap / plugins
     exception: str | None          # pretty-formatted exception block
     exception_raw: str | None

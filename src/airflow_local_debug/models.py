@@ -40,6 +40,15 @@ class TaskRunInfo:
     start_date: str | None = None
     end_date: str | None = None
     duration_seconds: float | None = None
+    mocked: bool = False
+
+
+@dataclass
+class TaskMockInfo:
+    task_id: str
+    mode: str
+    rule_name: str | None = None
+    xcom_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -61,6 +70,8 @@ class RunResult:
     graph_ascii: str | None = None
     graph_svg_path: str | None = None
     tasks: list[TaskRunInfo] = field(default_factory=list)
+    mocks: list[TaskMockInfo] = field(default_factory=list)
+    xcoms: dict[str, dict[str, Any]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     exception: str | None = None
     exception_raw: str | None = None

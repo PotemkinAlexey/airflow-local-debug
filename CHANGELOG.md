@@ -5,7 +5,21 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+- Generic task mocks via `TaskMockRule`, `load_task_mock_rules()`,
+  `task_mocks=...`, and repeatable CLI `--mock-file`. Mock rules can match by
+  `task_id`, `task_id_glob`, `operator`, or `operator_glob`, replace task
+  `execute()` with a successful local stub, and push configured XCom values.
+- Final XCom snapshot collection via `collect_xcoms=True`, `--dump-xcom`, and
+  `--xcom-json-path`.
+- `write_xcom_snapshot()` helper and `xcom.json` report artifact when collected
+  XComs exist.
+
+### Changed
+- `RunResult` now includes `mocks` and `xcoms`.
+- `TaskRunInfo` now includes `mocked`.
+- `tasks.csv` now includes a `mocked` column, and the console report marks
+  mocked tasks explicitly.
 
 ## [0.2.0] - 2026-05-07
 
