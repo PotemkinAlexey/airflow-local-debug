@@ -85,6 +85,8 @@ CLI flags (both entrypoints):
 | `--conf-json` | JSON object to pass as `dag_run.conf` |
 | `--conf-file` | Path to a JSON object file to pass as `dag_run.conf` |
 | `--env` | Extra `KEY=VALUE` environment variable for this run; repeatable |
+| `--env-file` | Load environment from a `.env` file; repeatable. See [docs/local-config.md](docs/local-config.md). |
+| `--no-auto-env` | Skip auto-discovery of a `.env` file in the current directory |
 | `--mock-file` | JSON/YAML task mock file; repeatable |
 | `--task` | Run only the selected task id; repeatable / comma-separated |
 | `--start-task` | Run the selected task id and all downstream tasks; repeatable / comma-separated |

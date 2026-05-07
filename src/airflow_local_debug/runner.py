@@ -160,6 +160,40 @@ def _load_cli_task_mocks(values: list[str] | None) -> list[TaskMockRule]:
     return rules
 
 
+def _load_cli_env_files(
+    values: list[str] | None,
+    *,
+    auto_discover: bool = True,
+    notes: list[str] | None = None,
+) -> dict[str, str]:
+    """Load and merge values from `--env-file` paths and (optionally) auto-discovered `.env`.
+
+    Later sources win over earlier ones. The auto-discovered `.env` is the
+    lowest priority and is only used when no explicit `--env-file` is given.
+    """
+    from airflow_local_debug.dotenv import discover_dotenv_path, parse_dotenv_file
+
+    layers: list[dict[str, str]] = []
+    explicit_paths = list(values or [])
+
+    if not explicit_paths and auto_discover:
+        auto_path = discover_dotenv_path()
+        if auto_path is not None:
+            layers.append(parse_dotenv_file(auto_path))
+            if notes is not None:
+                notes.append(f"Loaded auto-discovered env file {auto_path}")
+
+    for path in explicit_paths:
+        layers.append(parse_dotenv_file(path))
+        if notes is not None:
+            notes.append(f"Loaded env file {path}")
+
+    merged: dict[str, str] = {}
+    for layer in layers:
+        merged.update(layer)
+    return merged
+
+
 def _load_cli_selector_values(values: list[str] | None, *, option_name: str) -> list[str]:
     selectors: list[str] = []
     for value in values or []:
@@ -1936,6 +1970,21 @@ def debug_dag_cli(
         help="Extra environment variable for this local run; may be passed multiple times.",
     )
     parser.add_argument(
+        "--env-file",
+        dest="env_file",
+        action="append",
+        help=(
+            "Load environment variables from a .env file. May be passed multiple times. "
+            "When omitted, a .env file in the current directory is auto-loaded if present."
+        ),
+    )
+    parser.add_argument(
+        "--no-auto-env",
+        dest="no_auto_env",
+        action="store_true",
+        help="Disable auto-discovery of a .env file in the current directory.",
+    )
+    parser.add_argument(
         "--mock-file",
         dest="mock_file",
         action="append",
@@ -2008,6 +2057,13 @@ def debug_dag_cli(
     except ValueError as exc:
         parser.error(str(exc))
     try:
+        env_file_values = _load_cli_env_files(
+            args.env_file,
+            auto_discover=not args.no_auto_env,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
         task_mocks = _load_cli_task_mocks(args.mock_file)
     except ValueError as exc:
         parser.error(str(exc))
@@ -2024,6 +2080,7 @@ def debug_dag_cli(
         kwargs.pop("conf", None)
     programmatic_extra_env = kwargs.pop("extra_env", None)
     extra_env = dict(programmatic_extra_env or {})
+    extra_env.update(env_file_values)
     extra_env.update(cli_extra_env)
     if task_mocks:
         kwargs.pop("task_mocks", None)
@@ -2110,6 +2167,21 @@ def debug_dag_file_cli(
         help="Extra environment variable for this local run; may be passed multiple times.",
     )
     parser.add_argument(
+        "--env-file",
+        dest="env_file",
+        action="append",
+        help=(
+            "Load environment variables from a .env file. May be passed multiple times. "
+            "When omitted, a .env file in the current directory is auto-loaded if present."
+        ),
+    )
+    parser.add_argument(
+        "--no-auto-env",
+        dest="no_auto_env",
+        action="store_true",
+        help="Disable auto-discovery of a .env file in the current directory.",
+    )
+    parser.add_argument(
         "--mock-file",
         dest="mock_file",
         action="append",
@@ -2192,6 +2264,17 @@ def debug_dag_file_cli(
         extra_env = _load_cli_extra_env(args.env)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        env_file_values = _load_cli_env_files(
+            args.env_file,
+            auto_discover=not args.no_auto_env,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    # --env wins over --env-file / auto .env
+    merged_extra_env = dict(env_file_values)
+    merged_extra_env.update(extra_env)
+    extra_env = merged_extra_env
     try:
         task_mocks = _load_cli_task_mocks(args.mock_file)
     except ValueError as exc:

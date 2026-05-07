@@ -96,6 +96,56 @@ debug_dag(dag, extra_env={"FEATURE_FLAG": "local"})
 
 `extra_env` is applied only for the local run and restored afterward.
 
+## .env Files
+
+Pull credentials and feature flags from a `.env` file instead of duplicating
+them in `airflow_defaults.py`. Both CLI entrypoints accept `--env-file`
+(repeatable) and auto-discover a `.env` in the current directory:
+
+```bash
+airflow-debug-run /abs/path/to/my_dag.py \
+  --config-path /abs/path/to/airflow_defaults.py \
+  --env-file ./creds.env \
+  --env-file ./local.env
+```
+
+`airflow_defaults.py` can then reference these values via `os.getenv`:
+
+```python
+import os
+
+CONNECTIONS = {
+    "warehouse": {
+        "conn_type": "snowflake",
+        "host": "acme.snowflakecomputing.com",
+        "login": os.environ["SNOWFLAKE_USER"],
+        "password": os.environ["SNOWFLAKE_PASSWORD"],
+    },
+}
+```
+
+Resolution order (later wins):
+
+1. auto-discovered `./.env` (skipped when `--env-file` is given or
+   `--no-auto-env` is set)
+2. each `--env-file PATH` in the order they appear
+3. each `--env KEY=VALUE`
+4. existing process environment is preserved when none of the above set the
+   key
+
+Supported `.env` syntax: `KEY=VALUE`, comments, single- and double-quoted
+values (with `\n`/`\t`/`\r` escapes inside double quotes), optional
+`export` prefix.
+
+The library API exposes the same parser:
+
+```python
+from airflow_local_debug import parse_dotenv_file
+
+values = parse_dotenv_file(".env")
+debug_dag(dag, extra_env=values)
+```
+
 ## Validation
 
 Use doctor before a run:

@@ -70,6 +70,7 @@ from airflow_local_debug.bootstrap import (
 from airflow_local_debug.compat import get_airflow_version
 from airflow_local_debug.config_loader import get_default_config_path, load_local_config
 from airflow_local_debug.deferrables import detect_deferrable_tasks
+from airflow_local_debug.dotenv import discover_dotenv_path, parse_dotenv_file, parse_dotenv_text
 from airflow_local_debug.env_bootstrap import bootstrap_airflow_env
 from airflow_local_debug.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
 from airflow_local_debug.live_trace import live_task_trace
@@ -134,6 +135,7 @@ __all__ = [
     "DeferrableTaskInfo",
     "DebugPluginManager",
     "detect_deferrable_tasks",
+    "discover_dotenv_path",
     "DagFileInfo",
     "DoctorCheck",
     "DoctorResult",
@@ -155,6 +157,8 @@ __all__ = [
     "list_dags_from_file",
     "load_local_config",
     "LocalConfig",
+    "parse_dotenv_file",
+    "parse_dotenv_text",
     "print_dag_graph",
     "print_run_report",
     "ProblemLogPlugin",

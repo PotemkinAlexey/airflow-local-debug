@@ -501,6 +501,47 @@ def test_dag_candidates_from_module_deduplicates_and_sorts() -> None:
     assert candidates == [first, second]
 
 
+def test_load_cli_env_files_merges_explicit_files(tmp_path) -> None:
+    file_a = tmp_path / "a.env"
+    file_a.write_text("A=1\nSHARED=from_a\n")
+    file_b = tmp_path / "b.env"
+    file_b.write_text("B=2\nSHARED=from_b\n")
+
+    result = runner._load_cli_env_files([str(file_a), str(file_b)])
+
+    assert result == {"A": "1", "B": "2", "SHARED": "from_b"}
+
+
+def test_load_cli_env_files_auto_discovers_when_no_explicit_path(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".env").write_text("AUTO=found\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner._load_cli_env_files(None)
+
+    assert result == {"AUTO": "found"}
+
+
+def test_load_cli_env_files_skips_auto_discovery_when_disabled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".env").write_text("AUTO=found\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner._load_cli_env_files(None, auto_discover=False)
+
+    assert result == {}
+
+
+def test_load_cli_env_files_explicit_path_skips_auto_discovery(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".env").write_text("AUTO=ignored\n")
+    explicit = tmp_path / "explicit.env"
+    explicit.write_text("EXPLICIT=yes\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner._load_cli_env_files([str(explicit)])
+
+    assert result == {"EXPLICIT": "yes"}
+    assert "AUTO" not in result
+
+
 def test_format_dag_list_renders_task_counts(tmp_path) -> None:
     rendered = runner.format_dag_list(
         [
@@ -617,6 +658,69 @@ def test_debug_dag_cli_passes_extra_env(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert result.ok
     assert captured["extra_env"] == {"FOO": "bar", "KEEP": "yes", "BAZ": "qux"}
+
+
+def test_debug_dag_cli_loads_env_file_and_explicit_env_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    env_file = tmp_path / "creds.env"
+    env_file.write_text("DB_PASSWORD=from_file\nSHARED=from_file\n")
+
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.debug_dag_cli(
+        FakeDag(task_dict={}),
+        argv=["--env-file", str(env_file), "--env", "SHARED=from_cli"],
+    )
+
+    assert result.ok
+    assert captured["extra_env"]["DB_PASSWORD"] == "from_file"
+    assert captured["extra_env"]["SHARED"] == "from_cli"
+
+
+def test_debug_dag_cli_auto_discovers_dotenv_in_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    (tmp_path / ".env").write_text("AUTO_LOADED=1\n")
+
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    monkeypatch.chdir(tmp_path)
+
+    runner.debug_dag_cli(FakeDag(task_dict={}), argv=[])
+
+    assert captured["extra_env"]["AUTO_LOADED"] == "1"
+
+
+def test_debug_dag_cli_no_auto_env_disables_dotenv_discovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    (tmp_path / ".env").write_text("AUTO_LOADED=1\n")
+
+    captured: dict[str, Any] = {}
+
+    def fake_debug_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured.update(kwargs)
+        return RunResult(dag_id="demo", state="success")
+
+    monkeypatch.setattr(runner, "debug_dag", fake_debug_dag)
+    monkeypatch.chdir(tmp_path)
+
+    runner.debug_dag_cli(FakeDag(task_dict={}), argv=["--no-auto-env"])
+
+    assert captured.get("extra_env") in (None, {})
 
 
 def test_debug_dag_cli_passes_task_mocks_and_xcom_flags(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
