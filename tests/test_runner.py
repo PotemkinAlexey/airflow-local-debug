@@ -8,7 +8,23 @@ from typing import Any
 import pytest
 
 from airflow_local_debug import runner
+from airflow_local_debug.execution.dag_loader import dag_candidates_from_module
 from airflow_local_debug.execution.mocks import TaskMockRule
+from airflow_local_debug.execution.partial_runs import (
+    detect_external_upstreams,
+    format_external_upstream_note,
+    partial_dag_for_selected_tasks,
+    resolve_partial_task_ids,
+)
+from airflow_local_debug.execution.result import (
+    annotate_deferred_result,
+    extract_task_runs,
+    failed_task_label,
+    normalize_result,
+    normalize_task_states_for_backend,
+    task_state_buckets,
+)
+from airflow_local_debug.execution.state import duration_seconds, serialize_datetime, state_token, task_instance_label
 from airflow_local_debug.models import DagFileInfo, RunResult, TaskRunInfo
 
 # --- helpers --------------------------------------------------------------
@@ -78,8 +94,8 @@ class FakeDagrun:
 
 
 def test_serialize_datetime_handles_none_and_iso() -> None:
-    assert runner._serialize_datetime(None) is None
-    assert runner._serialize_datetime(datetime(2026, 1, 1, 12, 0)) == "2026-01-01T12:00:00"
+    assert serialize_datetime(None) is None
+    assert serialize_datetime(datetime(2026, 1, 1, 12, 0)) == "2026-01-01T12:00:00"
 
 
 def test_serialize_datetime_falls_back_to_str_for_unsupported() -> None:
@@ -90,16 +106,16 @@ def test_serialize_datetime_falls_back_to_str_for_unsupported() -> None:
         def __str__(self) -> str:  # noqa: D401
             return "weird"
 
-    assert runner._serialize_datetime(WeirdValue()) == "weird"
+    assert serialize_datetime(WeirdValue()) == "weird"
 
 
 def test_duration_seconds_handles_datetimes() -> None:
     start = datetime(2026, 1, 1, 12, 0, 0)
     end = datetime(2026, 1, 1, 12, 0, 1, 250000)
 
-    assert runner._duration_seconds(start, end) == 1.25
-    assert runner._duration_seconds(end, start) is None
-    assert runner._duration_seconds(None, end) is None
+    assert duration_seconds(start, end) == 1.25
+    assert duration_seconds(end, start) is None
+    assert duration_seconds(None, end) is None
 
 
 # --- _coerce_logical_date -------------------------------------------------
@@ -210,7 +226,7 @@ def test_resolve_partial_task_ids_selects_exact_tasks_only() -> None:
     _link(b, c)
     dag = FakeDag(task_dict={"a": a, "b": b, "c": c})
 
-    assert runner._resolve_partial_task_ids(dag, task_ids=["b"]) == ["b"]
+    assert resolve_partial_task_ids(dag, task_ids=["b"]) == ["b"]
 
 
 def test_resolve_partial_task_ids_selects_start_task_downstream() -> None:
@@ -222,7 +238,7 @@ def test_resolve_partial_task_ids_selects_start_task_downstream() -> None:
     _link(b, c)
     dag = FakeDag(task_dict={"a": a, "b": b, "c": c, "side": side})
 
-    assert runner._resolve_partial_task_ids(dag, start_task_ids=["b"]) == ["b", "c"]
+    assert resolve_partial_task_ids(dag, start_task_ids=["b"]) == ["b", "c"]
 
 
 def test_resolve_partial_task_ids_selects_task_group_descendants() -> None:
@@ -235,7 +251,7 @@ def test_resolve_partial_task_ids_selects_task_group_descendants() -> None:
     _link(b, c)
     dag = FakeDag(task_dict={"extract.raw": a, "extract.clean.normalize": b, "load": c})
 
-    assert runner._resolve_partial_task_ids(dag, task_group_ids=["extract"]) == [
+    assert resolve_partial_task_ids(dag, task_group_ids=["extract"]) == [
         "extract.raw",
         "extract.clean.normalize",
     ]
@@ -245,9 +261,9 @@ def test_resolve_partial_task_ids_rejects_unknown_selector() -> None:
     dag = FakeDag(task_dict={"a": FakeTask("a")})
 
     with pytest.raises(ValueError, match="Unknown task id"):
-        runner._resolve_partial_task_ids(dag, task_ids=["missing"])
+        resolve_partial_task_ids(dag, task_ids=["missing"])
     with pytest.raises(ValueError, match="Unknown task group"):
-        runner._resolve_partial_task_ids(dag, task_group_ids=["missing"])
+        resolve_partial_task_ids(dag, task_group_ids=["missing"])
 
 
 def test_detect_external_upstreams_finds_unmet_dependencies() -> None:
@@ -260,7 +276,7 @@ def test_detect_external_upstreams_finds_unmet_dependencies() -> None:
     _link(side, c)
     dag = FakeDag(task_dict={"a": a, "b": b, "c": c, "side": side})
 
-    external = runner._detect_external_upstreams(dag, ["b", "c"])
+    external = detect_external_upstreams(dag, ["b", "c"])
 
     assert external == {"b": ["a"], "c": ["side"]}
 
@@ -271,7 +287,7 @@ def test_detect_external_upstreams_returns_empty_for_root_task() -> None:
     _link(a, b)
     dag = FakeDag(task_dict={"a": a, "b": b})
 
-    assert runner._detect_external_upstreams(dag, ["a", "b"]) == {}
+    assert detect_external_upstreams(dag, ["a", "b"]) == {}
 
 
 def test_detect_external_upstreams_handles_singleton_root() -> None:
@@ -280,11 +296,11 @@ def test_detect_external_upstreams_handles_singleton_root() -> None:
     _link(a, b)
     dag = FakeDag(task_dict={"a": a, "b": b})
 
-    assert runner._detect_external_upstreams(dag, ["a"]) == {}
+    assert detect_external_upstreams(dag, ["a"]) == {}
 
 
 def test_format_external_upstream_note_lists_pairs() -> None:
-    note = runner._format_external_upstream_note({"b": ["a"], "c": ["side"]})
+    note = format_external_upstream_note({"b": ["a"], "c": ["side"]})
     assert "b <- a" in note
     assert "c <- side" in note
     assert "XCom pulls" in note
@@ -293,14 +309,14 @@ def test_format_external_upstream_note_lists_pairs() -> None:
 
 def test_format_external_upstream_note_truncates_long_lists() -> None:
     external = {f"t{i}": [f"u{i}"] for i in range(8)}
-    note = runner._format_external_upstream_note(external)
+    note = format_external_upstream_note(external)
     assert "+3 more" in note
 
 
 def test_partial_dag_for_selected_tasks_uses_airflow_subset_semantics() -> None:
     dag = FakeDag(task_dict={"a": FakeTask("a"), "b": FakeTask("b")})
 
-    subset = runner._partial_dag_for_selected_tasks(dag, ["b"])
+    subset = partial_dag_for_selected_tasks(dag, ["b"])
 
     assert list(subset.task_dict) == ["b"]
     assert subset.partial_subset_args == {
@@ -315,9 +331,9 @@ def test_partial_dag_for_selected_tasks_uses_airflow_subset_semantics() -> None:
 
 
 def test_state_token_lowercases_and_handles_none() -> None:
-    assert runner._state_token(None) is None
-    assert runner._state_token("  FAILED ") == "failed"
-    assert runner._state_token("") is None
+    assert state_token(None) is None
+    assert state_token("  FAILED ") == "failed"
+    assert state_token("") is None
 
 
 def test_task_state_buckets_splits_failed_and_unfinished() -> None:
@@ -329,7 +345,7 @@ def test_task_state_buckets_splits_failed_and_unfinished() -> None:
         TaskRunInfo(task_id="e", state="up_for_retry"),
     ]
 
-    failed, unfinished = runner._task_state_buckets(tasks)
+    failed, unfinished = task_state_buckets(tasks)
 
     assert {task.task_id for task in failed} == {"b", "c", "e"}
     assert {task.task_id for task in unfinished} == {"d"}
@@ -341,7 +357,7 @@ def test_extract_task_runs_records_duration() -> None:
     dagrun = FakeDagrun([FakeTI(task_id="a", state="success", start_date=start, end_date=end)])
     dag = FakeDag(task_dict={"a": FakeTask("a")})
 
-    tasks = runner._extract_task_runs(dagrun, dag)
+    tasks = extract_task_runs(dagrun, dag)
 
     assert len(tasks) == 1
     assert tasks[0].start_date == "2026-01-01T12:00:00"
@@ -353,7 +369,7 @@ def test_extract_task_runs_marks_mocked_tasks() -> None:
     dagrun = FakeDagrun([FakeTI(task_id="load", state="success")])
     dag = FakeDag(task_dict={"load": FakeTask("load")})
 
-    tasks = runner._extract_task_runs(dagrun, dag, mocked_task_ids={"load"})
+    tasks = extract_task_runs(dagrun, dag, mocked_task_ids={"load"})
 
     assert tasks[0].mocked is True
 
@@ -362,9 +378,9 @@ def test_extract_task_runs_marks_mocked_tasks() -> None:
 
 
 def test_task_instance_label_handles_map_index() -> None:
-    assert runner._task_instance_label(FakeTI(task_id="a")) == "a"
-    assert runner._task_instance_label(FakeTI(task_id="a", map_index=2)) == "a[2]"
-    assert runner._task_instance_label(FakeTI(task_id="")) is None
+    assert task_instance_label(FakeTI(task_id="a")) == "a"
+    assert task_instance_label(FakeTI(task_id="a", map_index=2)) == "a[2]"
+    assert task_instance_label(FakeTI(task_id="")) is None
 
 
 # --- _failed_task_label ---------------------------------------------------
@@ -372,7 +388,7 @@ def test_task_instance_label_handles_map_index() -> None:
 
 def test_failed_task_label_returns_none_when_nothing_failed() -> None:
     dagrun = FakeDagrun([FakeTI(task_id="a", state="success")])
-    assert runner._failed_task_label(dagrun) is None
+    assert failed_task_label(dagrun) is None
 
 
 def test_failed_task_label_collects_multiple_with_truncation() -> None:
@@ -384,7 +400,7 @@ def test_failed_task_label_collects_multiple_with_truncation() -> None:
             FakeTI(task_id="a", state="failed"),
         ]
     )
-    label = runner._failed_task_label(dagrun)
+    label = failed_task_label(dagrun)
     assert label is not None
     # Labels are sorted before truncation so DB task instance order does not leak into the report.
     assert label == "a, b, c ..."
@@ -406,7 +422,7 @@ def test_normalize_marks_downstream_as_upstream_failed_in_strict_mode() -> None:
         TaskRunInfo(task_id="c", state="scheduled"),
     ]
 
-    normalized = runner._normalize_task_states_for_backend(dag, tasks, backend="dag.test.strict")
+    normalized = normalize_task_states_for_backend(dag, tasks, backend="dag.test.strict")
 
     states = {task.task_id: task.state for task in normalized}
     assert states == {"a": "failed", "b": "upstream_failed", "c": "upstream_failed"}
@@ -421,7 +437,7 @@ def test_normalize_marks_unrelated_unfinished_as_not_run() -> None:
         TaskRunInfo(task_id="b", state="scheduled"),
     ]
 
-    normalized = runner._normalize_task_states_for_backend(dag, tasks, backend="dag.test.strict")
+    normalized = normalize_task_states_for_backend(dag, tasks, backend="dag.test.strict")
     states = {task.task_id: task.state for task in normalized}
 
     assert states == {"a": "failed", "b": "not_run"}
@@ -430,7 +446,7 @@ def test_normalize_marks_unrelated_unfinished_as_not_run() -> None:
 def test_normalize_is_noop_for_non_strict_backend() -> None:
     dag = FakeDag(task_dict={"a": FakeTask("a")})
     tasks = [TaskRunInfo(task_id="a", state="failed")]
-    assert runner._normalize_task_states_for_backend(dag, tasks, backend="dag.test") == tasks
+    assert normalize_task_states_for_backend(dag, tasks, backend="dag.test") == tasks
 
 
 # --- _normalize_result ----------------------------------------------------
@@ -442,7 +458,7 @@ def test_normalize_result_sets_failed_state_and_exception() -> None:
         state="success",  # incorrectly success even though tasks failed
         tasks=[TaskRunInfo(task_id="a", state="failed")],
     )
-    out = runner._normalize_result(result)
+    out = normalize_result(result)
     assert out.state == "failed"
     assert out.exception is not None
     assert "failed or retry-pending" in out.exception
@@ -455,7 +471,7 @@ def test_normalize_result_handles_enum_repr_state() -> None:
         state="DagRunState.SUCCESS",
         tasks=[TaskRunInfo(task_id="a", state="failed")],
     )
-    out = runner._normalize_result(result)
+    out = normalize_result(result)
     assert out.state == "failed"
 
 
@@ -465,7 +481,7 @@ def test_normalize_result_marks_incomplete_when_only_unfinished() -> None:
         state="running",
         tasks=[TaskRunInfo(task_id="a", state="scheduled")],
     )
-    out = runner._normalize_result(result)
+    out = normalize_result(result)
     assert out.state == "incomplete"
     assert out.exception is not None
 
@@ -473,7 +489,7 @@ def test_normalize_result_marks_incomplete_when_only_unfinished() -> None:
 def test_annotate_deferred_result_adds_actionable_note() -> None:
     result = RunResult(dag_id="demo", tasks=[TaskRunInfo(task_id="wait", state="deferred")])
 
-    runner._annotate_deferred_result(result)
+    annotate_deferred_result(result)
 
     assert result.notes
     assert "wait=deferred" in result.notes[0]
@@ -486,7 +502,7 @@ def test_normalize_result_keeps_success_when_all_tasks_done() -> None:
         state="success",
         tasks=[TaskRunInfo(task_id="a", state="success")],
     )
-    out = runner._normalize_result(result)
+    out = normalize_result(result)
     assert out.state == "success"
     assert out.exception is None
 
@@ -543,7 +559,7 @@ def test_dag_candidates_from_module_deduplicates_and_sorts() -> None:
     module.alias = first
     module.not_a_dag = object()
 
-    candidates = runner._dag_candidates_from_module(module)
+    candidates = dag_candidates_from_module(module)
 
     assert candidates == [first, second]
 

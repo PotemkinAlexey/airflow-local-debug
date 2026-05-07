@@ -242,10 +242,10 @@ def check_dag_file(
         )
 
     try:
-        from airflow_local_debug.runner import _load_module_from_file, _resolve_dag_from_module
+        from airflow_local_debug.execution.dag_loader import load_module_from_file, resolve_dag_from_module
 
-        module = _load_module_from_file(dag_path)
-        dag = _resolve_dag_from_module(module, dag_id=dag_id)
+        module = load_module_from_file(dag_path)
+        dag = resolve_dag_from_module(module, dag_id=dag_id)
     except Exception as exc:
         return DoctorCheck(
             name="DAG file",

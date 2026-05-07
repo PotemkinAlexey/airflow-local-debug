@@ -51,28 +51,14 @@ from airflow_local_debug.execution.partial_runs import (
     resolve_partial_task_ids,
 )
 from airflow_local_debug.execution.result import (
-    annotate_deferred_result,
     best_effort_last_dagrun,
-    extract_task_runs,
     failed_task_label,
-    normalize_result,
-    normalize_task_states_for_backend,
     result_from_dagrun,
-    summarize_task_states,
-    task_state_buckets,
 )
 from airflow_local_debug.execution.state import (
-    FAILED_TASK_STATES,
-    UNFINISHED_TASK_STATES,
-    best_effort_task_result,
-    duration_seconds,
     serialize_datetime,
-    state_token,
-    task_instance_label,
 )
 from airflow_local_debug.execution.strict_loop import strict_dag_test as _strict_dag_test
-from airflow_local_debug.execution.topology import downstream_task_ids
-from airflow_local_debug.execution.xcom import extract_xcoms, fallback_return_xcoms, json_safe, query_xcoms, task_xcom_label
 from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
@@ -85,39 +71,6 @@ from airflow_local_debug.reporting.console import print_run_preamble
 from airflow_local_debug.reporting.graph import format_dag_graph
 from airflow_local_debug.reporting.live_trace import live_task_trace
 from airflow_local_debug.reporting.traceback_utils import format_pretty_exception
-
-# Back-compat aliases for tests that still reference runner-internal names.
-_state_token = state_token
-_task_instance_label = task_instance_label
-_best_effort_task_result = best_effort_task_result
-_FAILED_TASK_STATES = FAILED_TASK_STATES
-_UNFINISHED_TASK_STATES = UNFINISHED_TASK_STATES
-_downstream_task_ids = downstream_task_ids
-_resolve_partial_task_ids = resolve_partial_task_ids
-_partial_dag_for_selected_tasks = partial_dag_for_selected_tasks
-_build_partial_selection_note = build_partial_selection_note
-_detect_external_upstreams = detect_external_upstreams
-_format_external_upstream_note = format_external_upstream_note
-_load_module_from_file = load_module_from_file
-_dag_candidates_from_module = dag_candidates_from_module
-_dag_file_info = dag_file_info
-_resolve_dag_from_module = resolve_dag_from_module
-_serialize_datetime = serialize_datetime
-_duration_seconds = duration_seconds
-_json_safe = json_safe
-_task_xcom_label = task_xcom_label
-_extract_xcoms = extract_xcoms
-_query_xcoms = query_xcoms
-_fallback_return_xcoms = fallback_return_xcoms
-_extract_task_runs = extract_task_runs
-_result_from_dagrun = result_from_dagrun
-_failed_task_label = failed_task_label
-_task_state_buckets = task_state_buckets
-_summarize_task_states = summarize_task_states
-_annotate_deferred_result = annotate_deferred_result
-_normalize_result = normalize_result
-_normalize_task_states_for_backend = normalize_task_states_for_backend
-_best_effort_last_dagrun = best_effort_last_dagrun
 
 _log = logging.getLogger(__name__)
 
@@ -399,7 +352,7 @@ def _error_result(
     deferrables: list[Any] | None = None,
     selected_tasks: list[str] | None = None,
 ) -> RunResult:
-    return _result_from_dagrun(
+    return result_from_dagrun(
         dag,
         dagrun,
         config_path=config_path,
@@ -408,7 +361,7 @@ def _error_result(
         backend=backend,
         exception=format_pretty_exception(
             exc,
-            task_id=_failed_task_label(dagrun) or getattr(dag, "dag_id", None),
+            task_id=failed_task_label(dagrun) or getattr(dag, "dag_id", None),
         ),
         exception_raw=error_raw,
         task_mock_registry=task_mock_registry,
@@ -450,7 +403,7 @@ def _execute_full_dag(
     run_context: dict[str, Any] = {}
     plugin_manager: DebugPluginManager | None = None
     try:
-        selected = _resolve_partial_task_ids(
+        selected = resolve_partial_task_ids(
             dag,
             task_ids=task_ids,
             start_task_ids=start_task_ids,
@@ -458,8 +411,8 @@ def _execute_full_dag(
         )
         if selected is not None:
             selected_task_ids = selected
-            notes.append(_build_partial_selection_note(dag, selected_task_ids))
-            external_upstreams = _detect_external_upstreams(dag, selected_task_ids)
+            notes.append(build_partial_selection_note(dag, selected_task_ids))
+            external_upstreams = detect_external_upstreams(dag, selected_task_ids)
             mocked_external = {
                 task_id: ups
                 for task_id, ups in external_upstreams.items()
@@ -471,13 +424,13 @@ def _execute_full_dag(
                 if not any(rule.task_id in ups for rule in task_mock_rules)
             }
             if unmocked_external:
-                notes.append(_format_external_upstream_note(unmocked_external))
+                notes.append(format_external_upstream_note(unmocked_external))
             if mocked_external:
                 covered = sorted({up for ups in mocked_external.values() for up in ups})
                 notes.append(
                     f"Partial run upstream XCom mocks active for: {', '.join(covered)}."
                 )
-            dag = _partial_dag_for_selected_tasks(dag, selected_task_ids)
+            dag = partial_dag_for_selected_tasks(dag, selected_task_ids)
 
         graph_ascii = _build_graph_ascii(dag, notes)
         backend_hint = _backend_hint(dag, fail_fast=fail_fast)
@@ -487,7 +440,7 @@ def _execute_full_dag(
             notes.append(deferrable_note)
         run_context = {
             "config_path": config_path,
-            "logical_date": _serialize_datetime(run_logical_date),
+            "logical_date": serialize_datetime(run_logical_date),
             "conf": dict(conf or {}),
             "extra_env": dict(extra_env or {}),
             "backend_hint": backend_hint,
@@ -534,7 +487,7 @@ def _execute_full_dag(
                 else:
                     backend = "dag.test"
                     dagrun = dag.test(**kwargs)
-                result = _result_from_dagrun(
+                result = result_from_dagrun(
                     dag,
                     dagrun,
                     config_path=config_path,
@@ -559,8 +512,8 @@ def _execute_full_dag(
 
                 kwargs = build_legacy_dag_run_kwargs(dag, run_logical_date, conf)
                 dag.run(**kwargs)
-                dagrun = _best_effort_last_dagrun(dag)
-                result = _result_from_dagrun(
+                dagrun = best_effort_last_dagrun(dag)
+                result = result_from_dagrun(
                     dag,
                     dagrun,
                     config_path=config_path,
@@ -589,7 +542,7 @@ def _execute_full_dag(
             return result
     except Exception as exc:
         error_raw = traceback.format_exc()
-        dagrun = dagrun or _best_effort_last_dagrun(dag)
+        dagrun = dagrun or best_effort_last_dagrun(dag)
         result = _error_result(
             dag=dag,
             dagrun=dagrun,
@@ -611,7 +564,7 @@ def _execute_full_dag(
             pending_base_exception = exc
         else:
             error_raw = traceback.format_exc()
-            dagrun = dagrun or _best_effort_last_dagrun(dag)
+            dagrun = dagrun or best_effort_last_dagrun(dag)
             result = _error_result(
                 dag=dag,
                 dagrun=dagrun,
@@ -658,8 +611,8 @@ def list_dags_from_file(
 ) -> list[DagFileInfo]:
     selected_config_path = config_path if config_path is not None else get_default_config_path(required=False)
     with bootstrap_airflow_env(config_path=selected_config_path, extra_env=extra_env):
-        module = _load_module_from_file(dag_file)
-        return [_dag_file_info(dag) for dag in _dag_candidates_from_module(module)]
+        module = load_module_from_file(dag_file)
+        return [dag_file_info(dag) for dag in dag_candidates_from_module(module)]
 
 
 def run_full_dag(
@@ -1030,8 +983,8 @@ def run_full_dag_from_file(
 
     try:
         with bootstrap_airflow_env(config_path=selected_config_path, extra_env=extra_env) as local_config:
-            module = _load_module_from_file(dag_file)
-            dag = _resolve_dag_from_module(module, dag_id=dag_id)
+            module = load_module_from_file(dag_file)
+            dag = resolve_dag_from_module(module, dag_id=dag_id)
             # extra_env is already applied by the outer bootstrap above (needed for DAG import).
             # Pass extra_env=None to _execute_full_dag to avoid a second redundant apply.
             return _execute_full_dag(
