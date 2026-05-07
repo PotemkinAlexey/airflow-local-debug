@@ -13,6 +13,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   package; the exclusion stays until / unless Airflow 3.0 receives a fix.
 
 ### Added
+- Documentation set under `docs/` covering CLI usage, library APIs, local
+  config, report artifacts, plugins, and Airflow compatibility.
 - `silenced_airflow_bootstrap_warnings()` context manager for library callers
   that need to suppress import-time Airflow warnings without leaking global state.
 - `RepeatedProblemWarningError` exported from the package root so callers can

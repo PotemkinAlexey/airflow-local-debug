@@ -18,6 +18,16 @@ package; the exclusion is enforced by the package metadata.
 - provides live per-task tracing and structured problem logging
 - exposes a small plugin system for custom hooks
 
+## Documentation
+
+- [Documentation index](docs/index.md)
+- [CLI usage](docs/cli.md)
+- [Library API](docs/library-api.md)
+- [Local config](docs/local-config.md)
+- [Reports and artifacts](docs/reports.md)
+- [Plugins](docs/plugins.md)
+- [Airflow compatibility](docs/airflow-compatibility.md)
+
 ## Installation
 
 ```bash
