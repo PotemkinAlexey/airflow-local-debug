@@ -408,9 +408,16 @@ class ProblemLogPlugin(AirflowDebugPlugin):
         self._patch_add_handler()
 
     def after_run(self, dag: Any, context: Mapping[str, Any], result: Any) -> None:
-        if self._original_add_handler is not None:
-            logging.Logger.addHandler = self._original_add_handler
+        # The class-level addHandler patch is the most dangerous bit of state
+        # in this plugin: if it survives the run, every other logger created
+        # later in this process inherits the patched method. Restore it first
+        # and inside try/finally so a later cleanup error cannot leak it.
+        try:
+            if self._original_add_handler is not None:
+                logging.Logger.addHandler = self._original_add_handler
+        finally:
             self._original_add_handler = None
+            self._unregister_atexit_cleanup()
 
         if self._pretty_handler is not None:
             for logger in self._attached_loggers:
@@ -433,6 +440,32 @@ class ProblemLogPlugin(AirflowDebugPlugin):
         if self._failure_token is not None:
             _HAS_PRIMARY_TASK_ERROR.reset(self._failure_token)
             self._failure_token = None
+
+    def _atexit_restore(self) -> None:
+        """Last-line-of-defense restore in case after_run never runs (SIGTERM, etc.)."""
+        original = self._original_add_handler
+        if original is not None:
+            logging.Logger.addHandler = original
+            self._original_add_handler = None
+
+    def _register_atexit_cleanup(self) -> None:
+        if getattr(self, "_atexit_registered", False):
+            return
+        import atexit
+
+        atexit.register(self._atexit_restore)
+        self._atexit_registered = True
+
+    def _unregister_atexit_cleanup(self) -> None:
+        if not getattr(self, "_atexit_registered", False):
+            return
+        import atexit
+
+        try:
+            atexit.unregister(self._atexit_restore)
+        except Exception:
+            pass
+        self._atexit_registered = False
 
     def _attach_filter(self, handler: logging.Handler, suppress_filter: logging.Filter) -> None:
         if any(existing is suppress_filter for existing in getattr(handler, "filters", ())):
@@ -462,6 +495,7 @@ class ProblemLogPlugin(AirflowDebugPlugin):
 
         self._original_add_handler = original_add_handler
         logging.Logger.addHandler = traced_add_handler
+        self._register_atexit_cleanup()
 
 
 def _mark_primary_task_error(error: BaseException) -> None:

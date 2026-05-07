@@ -47,3 +47,45 @@ def test_plugin_manager_isolates_plugin_errors() -> None:
 def test_plugin_manager_drops_none_plugins() -> None:
     manager = DebugPluginManager([None, _RecordingPlugin()])  # type: ignore[list-item]
     assert len(manager.plugins) == 1
+
+
+# --- ProblemLogPlugin: addHandler patch must always be restored -----------
+
+
+def test_problem_log_plugin_restores_add_handler_after_run() -> None:
+    import logging
+
+    from airflow_local_debug.plugins import ProblemLogPlugin
+
+    original = logging.Logger.addHandler
+    plugin = ProblemLogPlugin()
+    plugin.before_run(dag=None, context={})
+    assert logging.Logger.addHandler is not original  # patched
+    plugin.after_run(dag=None, context={}, result=None)
+    assert logging.Logger.addHandler is original  # restored
+
+
+def test_problem_log_plugin_restores_add_handler_even_when_post_restore_step_raises() -> None:
+    import logging
+
+    from airflow_local_debug.plugins import ProblemLogPlugin
+
+    original = logging.Logger.addHandler
+    plugin = ProblemLogPlugin()
+    plugin.before_run(dag=None, context={})
+
+    # Force a step AFTER the addHandler restore to raise; the addHandler
+    # patch must already be undone before this failure surfaces.
+    assert plugin._pretty_handler is not None
+
+    def boom_close() -> None:
+        raise RuntimeError("forced cleanup failure")
+
+    plugin._pretty_handler.close = boom_close  # type: ignore[method-assign]
+
+    try:
+        plugin.after_run(dag=None, context={}, result=None)
+    except RuntimeError:
+        pass
+
+    assert logging.Logger.addHandler is original

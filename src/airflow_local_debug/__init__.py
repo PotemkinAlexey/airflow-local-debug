@@ -77,15 +77,15 @@ from airflow_local_debug.execution.mocks import TaskMockRule, load_task_mock_rul
 from airflow_local_debug.models import DagFileInfo, DeferrableTaskInfo, LocalConfig, RunResult, TaskMockInfo, TaskRunInfo
 from airflow_local_debug.plugins import (
     AirflowDebugPlugin,
-    ConsoleTracePlugin,
-    DebugPluginManager,
+    ConsoleTracePlugin,  # noqa: F401  (back-compat re-export; not in __all__)
+    DebugPluginManager,  # noqa: F401  (back-compat re-export; not in __all__)
     ProblemLogPlugin,
     RepeatedProblemWarningError,
-    TaskContextPlugin,
+    TaskContextPlugin,  # noqa: F401  (back-compat re-export; not in __all__)
 )
 from airflow_local_debug.pytest_plugin import AirflowLocalRunner
 from airflow_local_debug.reporting.graph import format_dag_graph, print_dag_graph, render_dag_svg, write_dag_svg
-from airflow_local_debug.reporting.live_trace import live_task_trace
+from airflow_local_debug.reporting.live_trace import live_task_trace  # noqa: F401  (back-compat re-export)
 from airflow_local_debug.reporting.report import (
     format_run_gantt,
     format_run_report,
@@ -93,7 +93,13 @@ from airflow_local_debug.reporting.report import (
     write_run_artifacts,
     write_xcom_snapshot,
 )
-from airflow_local_debug.reporting.traceback_utils import StepTracer, StepTracerOptions, format_pretty_exception, safe_repr, shrink
+from airflow_local_debug.reporting.traceback_utils import (  # noqa: F401  (back-compat re-exports; not in __all__)
+    StepTracer,
+    StepTracerOptions,
+    format_pretty_exception,
+    safe_repr,
+    shrink,
+)
 from airflow_local_debug.runner import (
     debug_dag,
     debug_dag_cli,
@@ -129,67 +135,73 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+# Stable public API. Everything else is treated as internal — symbols that
+# used to live here remain importable from `airflow_local_debug.<submodule>`,
+# but they are no longer part of the stability promise.
+#
+# Internal symbols not listed below (still importable, no compat guarantee):
+#   StepTracer, StepTracerOptions, safe_repr, shrink — reporting.traceback_utils
+#   format_pretty_exception                          — reporting.traceback_utils
+#   live_task_trace                                  — reporting.live_trace
+#   ConsoleTracePlugin, TaskContextPlugin            — built-in trace plugins
+#   DebugPluginManager                               — plugin dispatcher
+#   is_supported_airflow_version, check_*            — doctor internals
+#   doctor_result_to_dict                            — doctor JSON helper
 __all__ = [
-    "AirflowDebugPlugin",
-    "AirflowLocalRunner",
-    "bootstrap_airflow_env",
-    "ConsoleTracePlugin",
+    # Run entrypoints
     "debug_dag",
     "debug_dag_cli",
     "debug_dag_file_cli",
     "debug_dag_from_file",
-    "DeferrableTaskInfo",
-    "DebugPluginManager",
-    "detect_deferrable_tasks",
-    "discover_dotenv_path",
-    "DagFileInfo",
-    "DoctorCheck",
-    "DoctorResult",
-    "doctor_result_to_dict",
-    "ensure_quiet_airflow_bootstrap",
-    "check_airflow_import",
-    "check_dag_file",
-    "check_local_config",
-    "check_metadata_db",
-    "format_dag_graph",
-    "format_dag_list",
-    "format_doctor_json",
-    "format_doctor_report",
-    "format_pretty_exception",
-    "format_run_gantt",
-    "format_run_report",
-    "get_airflow_version",
-    "get_default_config_path",
-    "live_task_trace",
-    "list_dags_from_file",
-    "load_local_config",
-    "LocalConfig",
-    "parse_dotenv_file",
-    "parse_dotenv_text",
-    "print_dag_graph",
-    "print_run_report",
-    "ProblemLogPlugin",
-    "render_dag_svg",
-    "RepeatedProblemWarningError",
-    "is_supported_airflow_version",
-    "run_doctor",
     "run_full_dag",
     "run_full_dag_from_file",
+    "list_dags_from_file",
+    "watch_dag_file",
+    # Result types
     "RunResult",
-    "safe_repr",
-    "shrink",
-    "silence_airflow_bootstrap_warnings",
-    "silenced_airflow_bootstrap_warnings",
-    "StepTracer",
-    "StepTracerOptions",
-    "TaskContextPlugin",
-    "TaskMockInfo",
-    "TaskMockRule",
     "TaskRunInfo",
+    "TaskMockInfo",
+    "DeferrableTaskInfo",
+    "DagFileInfo",
+    "LocalConfig",
+    # Mocks
+    "TaskMockRule",
     "load_task_mock_rules",
     "task_mock_rules_from_payload",
-    "watch_dag_file",
-    "write_dag_svg",
+    # Plugin system (subclass these from user code)
+    "AirflowDebugPlugin",
+    "ProblemLogPlugin",
+    "RepeatedProblemWarningError",
+    "AirflowLocalRunner",
+    # Doctor
+    "run_doctor",
+    "DoctorCheck",
+    "DoctorResult",
+    "format_doctor_report",
+    "format_doctor_json",
+    # Reports
+    "format_run_report",
+    "print_run_report",
+    "format_run_gantt",
     "write_run_artifacts",
     "write_xcom_snapshot",
+    "format_dag_list",
+    # Graph rendering
+    "format_dag_graph",
+    "print_dag_graph",
+    "render_dag_svg",
+    "write_dag_svg",
+    # Bootstrap / config
+    "bootstrap_airflow_env",
+    "silenced_airflow_bootstrap_warnings",
+    "silence_airflow_bootstrap_warnings",
+    "ensure_quiet_airflow_bootstrap",
+    "load_local_config",
+    "get_default_config_path",
+    "parse_dotenv_file",
+    "parse_dotenv_text",
+    "discover_dotenv_path",
+    # Detection / version
+    "detect_deferrable_tasks",
+    "get_airflow_version",
 ]
