@@ -85,7 +85,13 @@ from airflow_local_debug.plugins import (
     TaskContextPlugin,
 )
 from airflow_local_debug.pytest_plugin import AirflowLocalRunner
-from airflow_local_debug.report import format_run_report, print_run_report, write_run_artifacts, write_xcom_snapshot
+from airflow_local_debug.report import (
+    format_run_gantt,
+    format_run_report,
+    print_run_report,
+    write_run_artifacts,
+    write_xcom_snapshot,
+)
 from airflow_local_debug.runner import (
     debug_dag,
     debug_dag_cli,
@@ -150,6 +156,7 @@ __all__ = [
     "format_doctor_json",
     "format_doctor_report",
     "format_pretty_exception",
+    "format_run_gantt",
     "format_run_report",
     "get_airflow_version",
     "get_default_config_path",

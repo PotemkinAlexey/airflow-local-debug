@@ -4,11 +4,12 @@ import csv
 import json
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree
 
-from airflow_local_debug.models import RunResult
+from airflow_local_debug.models import RunResult, TaskRunInfo
 
 RunArtifactName = Literal["result", "report", "exception", "graph", "tasks", "junit", "xcom"]
 
@@ -45,6 +46,78 @@ def _task_state_summary(result: RunResult) -> str | None:
         return None
     counts = Counter(task.state or "unknown" for task in result.tasks)
     return ", ".join(f"{state}={counts[state]}" for state in sorted(counts))
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _gantt_timing_rows(
+    tasks: list[TaskRunInfo],
+) -> list[tuple[TaskRunInfo, datetime, float]]:
+    rows: list[tuple[TaskRunInfo, datetime, float]] = []
+    for task in tasks:
+        start = _parse_iso_datetime(task.start_date)
+        if start is None or task.duration_seconds is None:
+            continue
+        try:
+            duration = float(task.duration_seconds)
+        except (TypeError, ValueError):
+            continue
+        if duration < 0:
+            continue
+        rows.append((task, start, duration))
+    return rows
+
+
+def format_run_gantt(result: RunResult, *, width: int = 60) -> str | None:
+    """Render an ASCII mini-Gantt of task timings.
+
+    Returns None when no task has both `start_date` and `duration_seconds`,
+    or when the run finished in zero wall-time.
+    """
+    if width < 10:
+        width = 10
+
+    rows = _gantt_timing_rows(result.tasks)
+    if not rows:
+        return None
+
+    min_start = min(start for _, start, _ in rows)
+    max_end = max(start.timestamp() + duration for _, start, duration in rows)
+    total_span = max_end - min_start.timestamp()
+    if total_span <= 0:
+        return None
+
+    label_width = max(len(_gantt_label(task)) for task, _, _ in rows)
+    label_width = min(label_width, 32)
+
+    lines: list[str] = [f"Timing (total {_format_duration(total_span)}):"]
+    for task, start, duration in rows:
+        offset_s = start.timestamp() - min_start.timestamp()
+        offset_chars = max(0, int(round(offset_s / total_span * width)))
+        bar_chars = max(1, int(round(duration / total_span * width)))
+        if offset_chars + bar_chars > width:
+            bar_chars = max(1, width - offset_chars)
+        trailing = max(0, width - offset_chars - bar_chars)
+        bar = " " * offset_chars + "█" * bar_chars + " " * trailing
+        label = _gantt_label(task)
+        if len(label) > label_width:
+            label = label[: label_width - 1] + "…"
+        duration_label = _format_duration(duration) or f"{duration:.2f}s"
+        lines.append(f"  {label:<{label_width}}  [{bar}] {duration_label}")
+    return "\n".join(lines)
+
+
+def _gantt_label(task: TaskRunInfo) -> str:
+    if task.map_index is not None and task.map_index >= 0:
+        return f"{task.task_id}[{task.map_index}]"
+    return task.task_id
 
 
 def _write_junit_xml(result: RunResult, path: Path) -> None:
@@ -142,6 +215,10 @@ def format_run_report(result: RunResult, *, include_graph: bool = False) -> str:
             duration_suffix = f" ({duration})" if duration else ""
             mock_suffix = " [mocked]" if task.mocked else ""
             lines.append(f"- {task.task_id}{map_suffix}: {task.state or 'unknown'}{duration_suffix}{mock_suffix}")
+
+        gantt = format_run_gantt(result)
+        if gantt:
+            lines.append(gantt)
 
     if result.exception and not result.exception_was_logged:
         lines.append("Exception:")

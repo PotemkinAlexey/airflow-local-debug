@@ -4,7 +4,7 @@ import json
 from xml.etree import ElementTree
 
 from airflow_local_debug.models import DeferrableTaskInfo, RunResult, TaskMockInfo, TaskRunInfo
-from airflow_local_debug.report import _format_duration, format_run_report, write_run_artifacts
+from airflow_local_debug.report import _format_duration, format_run_gantt, format_run_report, write_run_artifacts
 
 
 def test_format_run_report_hides_duplicate_live_exception() -> None:
@@ -183,3 +183,100 @@ def test_write_run_artifacts_persists_snapshot_files(tmp_path) -> None:
     assert [case.attrib["name"] for case in cases] == ["first", "second"]
     assert cases[0].find("failure") is not None
     assert cases[1].find("skipped") is not None
+
+
+def test_format_run_gantt_returns_none_without_timing_data() -> None:
+    result = RunResult(
+        dag_id="demo",
+        tasks=[TaskRunInfo(task_id="a", state="success")],
+    )
+    assert format_run_gantt(result) is None
+
+
+def test_format_run_gantt_renders_offsets_and_durations() -> None:
+    result = RunResult(
+        dag_id="demo",
+        tasks=[
+            TaskRunInfo(
+                task_id="extract",
+                state="success",
+                start_date="2026-05-07T10:00:00+00:00",
+                end_date="2026-05-07T10:00:01+00:00",
+                duration_seconds=1.0,
+            ),
+            TaskRunInfo(
+                task_id="transform",
+                state="success",
+                start_date="2026-05-07T10:00:01+00:00",
+                end_date="2026-05-07T10:00:04+00:00",
+                duration_seconds=3.0,
+            ),
+            TaskRunInfo(
+                task_id="load",
+                state="success",
+                start_date="2026-05-07T10:00:04+00:00",
+                end_date="2026-05-07T10:00:10+00:00",
+                duration_seconds=6.0,
+            ),
+        ],
+    )
+
+    rendered = format_run_gantt(result, width=40)
+    assert rendered is not None
+    lines = rendered.splitlines()
+    assert lines[0].startswith("Timing (total ")
+    assert any(line.startswith("  extract") for line in lines)
+    assert any(line.startswith("  transform") for line in lines)
+    assert any(line.startswith("  load") for line in lines)
+    assert "█" in rendered
+
+
+def test_format_run_gantt_skips_tasks_with_partial_data() -> None:
+    result = RunResult(
+        dag_id="demo",
+        tasks=[
+            TaskRunInfo(
+                task_id="ok",
+                state="success",
+                start_date="2026-05-07T10:00:00+00:00",
+                duration_seconds=1.0,
+            ),
+            TaskRunInfo(task_id="missing_start", state="success", duration_seconds=1.0),
+            TaskRunInfo(task_id="missing_duration", state="success", start_date="2026-05-07T10:00:01+00:00"),
+        ],
+    )
+    rendered = format_run_gantt(result)
+    assert rendered is not None
+    assert "ok" in rendered
+    assert "missing_start" not in rendered
+    assert "missing_duration" not in rendered
+
+
+def test_format_run_gantt_returns_none_when_total_span_is_zero() -> None:
+    same_instant = "2026-05-07T10:00:00+00:00"
+    result = RunResult(
+        dag_id="demo",
+        tasks=[
+            TaskRunInfo(task_id="a", state="success", start_date=same_instant, duration_seconds=0.0),
+        ],
+    )
+    assert format_run_gantt(result) is None
+
+
+def test_format_run_report_includes_gantt_when_timing_available() -> None:
+    result = RunResult(
+        dag_id="demo",
+        state="success",
+        tasks=[
+            TaskRunInfo(
+                task_id="only",
+                state="success",
+                start_date="2026-05-07T10:00:00+00:00",
+                end_date="2026-05-07T10:00:02+00:00",
+                duration_seconds=2.0,
+            ),
+        ],
+    )
+    rendered = format_run_report(result)
+    assert "Timing (total" in rendered
+    assert "only" in rendered

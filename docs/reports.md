@@ -18,6 +18,7 @@ The final report includes:
 - deferrable task handling when detected
 - task state summary
 - per-task state and duration
+- mini-Gantt chart of task timings when `start_date` data is available
 - formatted exception when it was not already logged live
 
 Example:
@@ -31,9 +32,21 @@ Task summary: failed=1, success=2
 Tasks:
 - extract: success (1.24s)
 - transform: failed (411ms)
+Timing (total 1.65s):
+  extract    [██████████████████████████████████              ] 1.24s
+  transform  [                                  ██████████████]  411ms
 Exception:
 ...
 ```
+
+The Gantt chart is rendered automatically whenever Airflow reports
+`start_date` and `duration_seconds` for at least one task. It uses absolute
+offsets from the first task's start, so parallel branches and sequential
+chains are both visible at a glance. Use it to spot slow tasks without
+opening the full report directory.
+
+The library API exposes `format_run_gantt(result, *, width=60)` for custom
+rendering or width control.
 
 ## Artifact Directory
 
