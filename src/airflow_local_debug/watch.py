@@ -269,7 +269,7 @@ def watch_dag_file(
         except KeyboardInterrupt:
             output.write("\n[watch] exiting\n")
             output.flush()
-            return last_result
+            return last_result or RunResult(dag_id=dag_id or "<unknown>")
 
 
 def _try_wait_via_watchdog(roots: list[Path], *, stream: IO[str]) -> bool:
