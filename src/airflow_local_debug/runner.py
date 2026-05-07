@@ -2168,6 +2168,24 @@ def debug_dag_file_cli(
         dest="graph_svg_path",
         help="Path to write the rendered DAG graph SVG (defaults to graph.svg inside --report-dir).",
     )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Re-run the DAG when watched files change. On task failure, retry from the failed task.",
+    )
+    parser.add_argument(
+        "--watch-path",
+        dest="watch_path",
+        action="append",
+        help="Extra file or directory to watch in --watch mode. May be passed multiple times.",
+    )
+    parser.add_argument(
+        "--watch-interval",
+        dest="watch_interval",
+        type=float,
+        default=0.5,
+        help="Polling interval in seconds for --watch mode (default: 0.5).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -2206,6 +2224,27 @@ def debug_dag_file_cli(
         conf = _load_cli_conf(conf_json=args.conf_json, conf_file=args.conf_file)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.watch:
+        from airflow_local_debug.watch import watch_dag_file
+
+        return watch_dag_file(
+            args.dag_file,
+            dag_id=args.dag_id,
+            watch_paths=args.watch_path or [],
+            poll_interval=args.watch_interval,
+            config_path=args.config_path,
+            logical_date=args.logical_date,
+            conf=conf,
+            extra_env=extra_env or None,
+            trace=not args.no_trace,
+            fail_fast=not args.no_fail_fast,
+            task_mocks=task_mocks,
+            task_ids=task_ids,
+            start_task_ids=start_task_ids,
+            task_group_ids=task_group_ids,
+            collect_xcoms=args.dump_xcom or args.xcom_json_path is not None,
+        )
 
     return debug_dag_from_file(
         args.dag_file,

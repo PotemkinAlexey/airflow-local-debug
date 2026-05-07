@@ -96,6 +96,7 @@ from airflow_local_debug.runner import (
     run_full_dag_from_file,
 )
 from airflow_local_debug.traceback_utils import StepTracer, StepTracerOptions, format_pretty_exception, safe_repr, shrink
+from airflow_local_debug.watch import watch_dag_file
 
 _DOCTOR_EXPORTS = {
     "DoctorCheck",
@@ -176,6 +177,7 @@ __all__ = [
     "TaskRunInfo",
     "load_task_mock_rules",
     "task_mock_rules_from_payload",
+    "watch_dag_file",
     "write_dag_svg",
     "write_run_artifacts",
     "write_xcom_snapshot",

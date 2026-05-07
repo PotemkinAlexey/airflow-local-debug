@@ -9,6 +9,7 @@ Start here:
 - [CLI usage](cli.md): `airflow-debug-run`, `airflow-debug-doctor`, flags, and exit codes.
 - [Library API](library-api.md): importable APIs for DAG code and Python test suites.
 - [Pytest fixture](pytest.md): `airflow_local_runner` fixture for integration tests.
+- [Watch mode](watch.md): `--watch` hot-reload loop with retry-from-failed-task.
 - [Local config](local-config.md): local connections, variables, pools, and environment precedence.
 - [Reports and artifacts](reports.md): console report, `result.json`, `tasks.csv`, `junit.xml`, graph files.
 - [Plugins](plugins.md): hook points and custom runtime instrumentation.

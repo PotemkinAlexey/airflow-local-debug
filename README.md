@@ -27,6 +27,7 @@ package; the exclusion is enforced by the package metadata.
 - [CLI usage](docs/cli.md)
 - [Library API](docs/library-api.md)
 - [Pytest fixture](docs/pytest.md)
+- [Watch mode](docs/watch.md)
 - [Local config](docs/local-config.md)
 - [Reports and artifacts](docs/reports.md)
 - [Plugins](docs/plugins.md)
@@ -102,6 +103,9 @@ File-based runner only:
 |---|---|
 | `--dag-id` | Select one DAG when the file defines multiple DAGs |
 | `--list-dags` | Print discovered DAG ids and task counts, then exit without running |
+| `--watch` | Re-run on file changes; on task failure retry from the failed task. See [docs/watch.md](docs/watch.md). |
+| `--watch-path` | Extra path to watch in `--watch` mode; repeatable |
+| `--watch-interval` | Polling interval in seconds for `--watch` (default 0.5) |
 
 ## Doctor
 
