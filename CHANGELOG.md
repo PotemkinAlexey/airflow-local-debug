@@ -5,6 +5,10 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.2.0] - 2026-05-07
+
 ### Compatibility
 - Airflow range pinned to `>=2.10,!=3.0.*,<4`. Validated on Airflow 2.10+,
   3.1.3, 3.2.1. Airflow 3.0.x is excluded because its local execution API
