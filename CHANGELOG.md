@@ -106,6 +106,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   failure normalization, and package build behavior.
 - CI installs `build` explicitly before `python -m build`.
 - `MANIFEST.in` includes `docs/*.md` in source distributions.
+- `make check` runs tests plus build; `make smoke` runs the Airflow runtime
+  smoke script in a temporary `AIRFLOW_HOME`.
 - `Makefile clean` also removes root-level `*.egg-info`.
 - README expanded with documentation navigation, plugins, `RunResult`,
   fail-fast mode, and graph renderers.

@@ -263,6 +263,9 @@ state and is intended for one-shot CLI use only.
 make install-dev
 make test
 make build
+make check   # tests + build
+make smoke   # Airflow runtime smoke in a temporary AIRFLOW_HOME
 ```
 
-CI runs the test suite on Python 3.10, 3.11, 3.12 and validates the wheel/sdist build.
+CI runs the test suite on Python 3.10, 3.11, 3.12, validates Airflow 2.10+ and
+Airflow 3.1+/3.2 runtime smoke paths, and builds the wheel/sdist.

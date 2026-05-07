@@ -63,3 +63,11 @@ The repository CI validates a compatibility matrix across Python and Airflow ver
 - successful strict DAG run,
 - failed strict DAG run with downstream normalization,
 - wheel/sdist build.
+
+Run the same local smoke shape with:
+
+```bash
+make smoke
+```
+
+`make smoke` creates a temporary `AIRFLOW_HOME`, runs `airflow db migrate`, and then executes `tests/smoke_airflow_runtime.py`.

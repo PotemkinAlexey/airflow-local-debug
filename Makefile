@@ -1,6 +1,6 @@
 PYTHON ?= python
 
-.PHONY: install-dev test build clean
+.PHONY: install-dev test build check smoke clean
 
 install-dev:
 	$(PYTHON) -m pip install -e .[dev]
@@ -10,6 +10,14 @@ test:
 
 build:
 	$(PYTHON) -m build
+
+check: test build
+
+smoke:
+	tmp_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp_dir"' EXIT; \
+	AIRFLOW_HOME=$$tmp_dir AIRFLOW__CORE__LOAD_EXAMPLES=False $(PYTHON) -m airflow db migrate; \
+	AIRFLOW_HOME=$$tmp_dir AIRFLOW__CORE__LOAD_EXAMPLES=False $(PYTHON) tests/smoke_airflow_runtime.py
 
 clean:
 	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .mypy_cache
