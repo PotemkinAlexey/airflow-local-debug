@@ -93,12 +93,47 @@ def first_failed_task_id(result: RunResult) -> str | None:
     return None
 
 
+def _modules_under_watch_roots(names: set[str], roots: Iterable[Path]) -> set[str]:
+    """Filter `names` to those whose `__file__` lives under a watch root.
+
+    Used to scope the snapshot diff so unrelated lazy-imported modules
+    (Airflow providers loaded on first use, etc.) are not also dropped.
+    """
+    target_prefixes: list[str] = []
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved.is_dir():
+            target_prefixes.append(str(resolved) + "/")
+        elif resolved.is_file():
+            target_prefixes.append(str(resolved.parent) + "/")
+    if not target_prefixes:
+        return set()
+
+    matched: set[str] = set()
+    for name in names:
+        module = sys.modules.get(name)
+        if module is None:  # type: ignore[unreachable]
+            continue
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        for prefix in target_prefixes:
+            if module_file.startswith(prefix):
+                matched.add(name)
+                break
+    return matched
+
+
 def purge_module_cache(roots: Iterable[Path]) -> int:
     """Drop sys.modules entries whose source file lives under any watch root.
 
-    Returns the number of dropped modules. This forces a fresh re-import on
-    the next runner call so helper modules picked up via the DAG file are
-    reloaded too.
+    Returns the number of dropped modules. Kept as a public utility for
+    external callers; the watch loop itself uses a snapshot-diff strategy
+    (see `_modules_under_watch_roots`) which is O(N_dag_modules) instead
+    of O(all sys.modules).
     """
     targets: list[Path] = []
     for root in roots:
@@ -170,14 +205,17 @@ def watch_dag_file(
     roots = resolve_watch_roots(dag_file, list(watch_paths or []))
     last_failed_task: str | None = None
     last_result: RunResult | None = None
+    dag_loaded_modules: set[str] = set()
     iterations = 0
 
     output.write(f"[watch] watching {len(roots)} path(s); save a file to retry, Ctrl+C to exit\n")
     output.flush()
 
     while True:
-        if iterations:
-            purge_module_cache(roots)
+        if iterations and dag_loaded_modules:
+            for name in dag_loaded_modules:
+                sys.modules.pop(name, None)
+            dag_loaded_modules = set()
 
         kwargs = dict(runner_kwargs)
         if last_failed_task is not None:
@@ -187,12 +225,17 @@ def watch_dag_file(
             kwargs.pop("task_group_ids", None)
 
         output.flush()
+        modules_before = set(sys.modules)
         try:
             result = runner(dag_file, dag_id=dag_id, **kwargs)
         except KeyboardInterrupt:
             output.write("\n[watch] interrupted\n")
             output.flush()
             return last_result or RunResult(dag_id=dag_id or "<unknown>")
+        # Track only modules whose source file lives under a watch root, so we
+        # do not blow away unrelated lazy-imported third-party modules between
+        # iterations.
+        dag_loaded_modules = _modules_under_watch_roots(set(sys.modules) - modules_before, roots)
 
         reporter(result)
         last_result = result
@@ -216,11 +259,66 @@ def watch_dag_file(
             return last_result
 
         try:
-            _wait_for_change(roots, poll_interval=poll_interval, sleep=sleep, stream=output)
+            # Tests inject a custom `sleep`; force polling in that case so
+            # the test loop stays deterministic.
+            using_default_sleep = sleep is time.sleep
+            if using_default_sleep and _try_wait_via_watchdog(roots, stream=output):
+                pass
+            else:
+                _wait_for_change(roots, poll_interval=poll_interval, sleep=sleep, stream=output)
         except KeyboardInterrupt:
             output.write("\n[watch] exiting\n")
             output.flush()
             return last_result
+
+
+def _try_wait_via_watchdog(roots: list[Path], *, stream: IO[str]) -> bool:
+    """Block until any watched path changes, using `watchdog` if installed.
+
+    Returns True when watchdog handled the wait; False when watchdog is
+    unavailable (caller falls back to polling).
+    """
+    try:
+        from watchdog.events import FileSystemEvent, FileSystemEventHandler
+        from watchdog.observers import Observer
+    except ImportError:
+        return False
+
+    import threading
+
+    changed = threading.Event()
+
+    class _Handler(FileSystemEventHandler):  # type: ignore[misc]
+        def on_any_event(self, event: FileSystemEvent) -> None:
+            if event.event_type in ("modified", "created", "deleted", "moved"):
+                changed.set()
+
+    handler = _Handler()
+    observer = Observer()
+    scheduled = 0
+    seen_dirs: set[str] = set()
+    for root in roots:
+        try:
+            target_dir = str(root if root.is_dir() else root.parent)
+        except OSError:
+            continue
+        if target_dir in seen_dirs:
+            continue
+        seen_dirs.add(target_dir)
+        observer.schedule(handler, target_dir, recursive=root.is_dir())
+        scheduled += 1
+    if not scheduled:
+        return False
+
+    observer.start()
+    try:
+        changed.wait()
+    finally:
+        observer.stop()
+        observer.join()
+    stream.write("[watch] detected change (watchdog); reloading...\n")
+    stream.flush()
+    return True
 
 
 def _wait_for_change(

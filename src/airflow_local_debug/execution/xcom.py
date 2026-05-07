@@ -46,12 +46,19 @@ def task_xcom_label(task_id: str, map_index: int | None) -> str:
 
 
 def extract_xcoms(dagrun: Any, dag: Any) -> dict[str, dict[str, Any]]:
-    """Collect XComs from this dagrun: DB query first, then xcom_pull fallback."""
+    """Collect XComs from this dagrun: DB query first, then xcom_pull fallback.
+
+    The fallback `xcom_pull` issues per-TI DB lookups and is only useful
+    for tasks whose `return_value` did not appear in the bulk query (some
+    local backends defer the XCom write). To avoid pointless round-trips,
+    skip the fallback for labels that already have a `return_value`.
+    """
     if dagrun is None:
         return {}
 
     snapshot = query_xcoms(dagrun, dag)
-    fallback = fallback_return_xcoms(dagrun)
+    already_have_return = {label for label, values in snapshot.items() if "return_value" in values}
+    fallback = fallback_return_xcoms(dagrun, skip_labels=already_have_return)
     for label, values in fallback.items():
         snapshot.setdefault(label, {}).update(
             {key: value for key, value in values.items() if key not in snapshot.get(label, {})}
@@ -98,16 +105,25 @@ def query_xcoms(dagrun: Any, dag: Any) -> dict[str, dict[str, Any]]:
     return snapshot
 
 
-def fallback_return_xcoms(dagrun: Any) -> dict[str, dict[str, Any]]:
+def fallback_return_xcoms(
+    dagrun: Any,
+    *,
+    skip_labels: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Per-TI `xcom_pull` fallback. Skips labels listed in `skip_labels`."""
     if not hasattr(dagrun, "get_task_instances"):
         return {}
 
+    skip = skip_labels or set()
     snapshot: dict[str, dict[str, Any]] = {}
     for ti in dagrun.get_task_instances():
+        task_id = str(getattr(ti, "task_id", "<unknown>"))
+        map_index = getattr(ti, "map_index", None)
+        label = task_xcom_label(task_id, map_index)
+        if label in skip:
+            continue
         value = best_effort_task_result(ti)
         if value is None:
             continue
-        task_id = str(getattr(ti, "task_id", "<unknown>"))
-        map_index = getattr(ti, "map_index", None)
-        snapshot[task_xcom_label(task_id, map_index)] = {"return_value": json_safe(value)}
+        snapshot[label] = {"return_value": json_safe(value)}
     return snapshot

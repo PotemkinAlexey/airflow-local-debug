@@ -30,6 +30,10 @@ Press `Ctrl+C` to exit the loop.
 | `--watch-path PATH` | DAG file's parent dir | Extra file or directory to watch. May be passed multiple times. |
 | `--watch-interval SECONDS` | `0.5` | Polling interval. Lower = faster reaction, higher CPU cost. |
 
+If [`watchdog`](https://pypi.org/project/watchdog/) is installed in the same
+environment, the watcher uses it automatically (event-driven, no polling).
+`--watch-interval` only matters when watchdog is not available.
+
 ## What gets watched
 
 By default the watcher tracks the DAG file and its parent directory

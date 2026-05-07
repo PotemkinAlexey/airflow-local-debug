@@ -981,3 +981,32 @@ def test_debug_dag_file_cli_passes_partial_selectors(monkeypatch: pytest.MonkeyP
     assert captured["task_ids"] == ["one"]
     assert captured["start_task_ids"] == ["middle", "end"]
     assert captured["task_group_ids"] == ["warehouse"]
+
+
+# --- xcom extraction skip-when-covered ------------------------------------
+
+
+def test_extract_xcoms_skips_fallback_for_already_covered_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    from airflow_local_debug.execution import xcom as xcom_module
+
+    monkeypatch.setattr(
+        xcom_module,
+        "query_xcoms",
+        lambda dagrun, dag: {"task_a": {"return_value": "from_db"}},
+    )
+
+    fallback_calls: list[set[str]] = []
+
+    def fake_fallback(dagrun: Any, *, skip_labels: set[str] | None = None) -> dict[str, dict[str, Any]]:
+        fallback_calls.append(skip_labels or set())
+        return {"task_b": {"return_value": "from_pull"}}
+
+    monkeypatch.setattr(xcom_module, "fallback_return_xcoms", fake_fallback)
+
+    result = xcom_module.extract_xcoms(object(), object())
+
+    assert fallback_calls == [{"task_a"}]
+    assert result == {
+        "task_a": {"return_value": "from_db"},
+        "task_b": {"return_value": "from_pull"},
+    }
