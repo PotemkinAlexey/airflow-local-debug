@@ -14,6 +14,9 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   non-callable `pre_execute`.
 - `airflow-debug-doctor` now applies repeatable `--env KEY=VALUE` values while
   validating local config files and importing DAG files.
+- Added unit coverage around the `execute_full_dag` orchestrator routing paths
+  for strict `dag.test`, non-strict `dag.test`, legacy `dag.run`, unsupported
+  DAGs, and partial selections.
 
 ## [0.3.0] - 2026-05-08
 
