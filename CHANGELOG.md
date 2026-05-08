@@ -32,6 +32,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   path-hashed module names and failed-import cache cleanup.
 - Added unit coverage for strict scheduling-loop ordering, trace callbacks,
   failure handling, logger attachment, and Airflow 3 fileloc fallback guards.
+- Added unit coverage for DAG file loading metadata and explicit DAG
+  resolution errors.
 
 ## [0.3.0] - 2026-05-08
 
