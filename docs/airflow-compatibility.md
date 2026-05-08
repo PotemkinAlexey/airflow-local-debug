@@ -81,6 +81,9 @@ The repository CI validates a compatibility matrix across Python and Airflow ver
 - doctor command behavior,
 - successful strict DAG run,
 - failed strict DAG run with downstream normalization,
+- partial strict DAG run selection,
+- report artifact output (`report.md`, `result.json`, `tasks.csv`,
+  `junit.xml`, `graph.svg`, `graph.txt`, and `xcom.json`),
 - wheel/sdist build.
 
 Run the same local smoke shape with:

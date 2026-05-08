@@ -7,6 +7,7 @@ from pathlib import Path
 import airflow
 
 from airflow_local_debug import (
+    debug_dag,
     is_supported_airflow_version,
     run_doctor,
     run_full_dag,
@@ -27,6 +28,10 @@ except Exception:
 
 def _boom(**_context):
     raise RuntimeError("expected smoke failure")
+
+
+def _return_payload(**_context):
+    return {"rows": 1}
 
 
 def _write_doctor_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -150,6 +155,33 @@ def _run_partial_smoke() -> None:
     assert [(task.task_id, task.state) for task in result.tasks] == [("middle", "success"), ("last", "success")]
 
 
+def _run_artifact_smoke() -> None:
+    with tempfile.TemporaryDirectory(prefix="ald-artifacts-") as raw_tmp:
+        report_dir = Path(raw_tmp) / "report"
+        with DAG(
+            dag_id="ald_ci_artifacts",
+            schedule=None,
+            start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        ) as dag:
+            PythonOperator(task_id="payload", python_callable=_return_payload)
+
+        result = debug_dag(
+            dag,
+            logical_date=datetime(2026, 1, 5, tzinfo=timezone.utc),
+            trace=False,
+            fail_fast=True,
+            collect_xcoms=True,
+            include_graph_in_report=True,
+            report_dir=report_dir,
+            raise_on_failure=False,
+        )
+
+        assert result.ok, result.exception_raw
+        assert result.graph_svg_path == str((report_dir / "graph.svg").resolve())
+        for name in ("report.md", "result.json", "tasks.csv", "junit.xml", "graph.svg", "graph.txt", "xcom.json"):
+            assert (report_dir / name).exists(), name
+
+
 def main() -> None:
     version = getattr(airflow, "__version__", None)
     assert is_supported_airflow_version(version), f"Unsupported Airflow version in smoke: {version}"
@@ -158,6 +190,7 @@ def main() -> None:
     _run_success_smoke()
     _run_fail_fast_smoke()
     _run_partial_smoke()
+    _run_artifact_smoke()
 
 
 if __name__ == "__main__":

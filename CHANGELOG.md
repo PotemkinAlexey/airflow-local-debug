@@ -14,6 +14,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - Added golden snapshot coverage for the standard report artifact set:
   `report.md`, `result.json`, `tasks.csv`, `junit.xml`, `graph.txt`, and
   `xcom.json`.
+- Extended Airflow runtime smoke coverage to verify report artifact output and
+  included `examples/` in CI linting.
 
 ### Fixed
 - Failed local config loads no longer add misleading "Loaded local config"
