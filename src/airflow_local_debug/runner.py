@@ -201,6 +201,14 @@ def debug_dag(
     return result
 
 
+def _cli_value(cli_value: Any, programmatic_value: Any) -> Any:
+    return cli_value if cli_value is not None else programmatic_value
+
+
+def _cli_flag(flag_enabled: bool, cli_value: Any, programmatic_value: Any) -> Any:
+    return cli_value if flag_enabled else programmatic_value
+
+
 def debug_dag_cli(
     dag: Any,
     *,
@@ -218,20 +226,17 @@ def debug_dag_cli(
     add_common_run_args(parser)
     args = parser.parse_args(argv)
 
-    programmatic_config_path = kwargs.pop("config_path", None)
-    config_path = args.config_path if args.config_path is not None else programmatic_config_path
-    programmatic_logical_date = kwargs.pop("logical_date", None)
-    logical_date = args.logical_date if args.logical_date is not None else programmatic_logical_date
-    programmatic_report_dir = kwargs.pop("report_dir", None)
-    report_dir = args.report_dir if args.report_dir is not None else programmatic_report_dir
-    programmatic_graph_svg_path = kwargs.pop("graph_svg_path", None)
-    graph_svg_path = args.graph_svg_path if args.graph_svg_path is not None else programmatic_graph_svg_path
-    programmatic_trace = kwargs.pop("trace", True)
-    trace = False if args.no_trace else programmatic_trace
-    programmatic_fail_fast = kwargs.pop("fail_fast", True)
-    fail_fast = False if args.no_fail_fast else programmatic_fail_fast
-    programmatic_include_graph_in_report = kwargs.pop("include_graph_in_report", False)
-    include_graph_in_report = True if args.include_graph_in_report else programmatic_include_graph_in_report
+    config_path = _cli_value(args.config_path, kwargs.pop("config_path", None))
+    logical_date = _cli_value(args.logical_date, kwargs.pop("logical_date", None))
+    report_dir = _cli_value(args.report_dir, kwargs.pop("report_dir", None))
+    graph_svg_path = _cli_value(args.graph_svg_path, kwargs.pop("graph_svg_path", None))
+    trace = _cli_flag(args.no_trace, False, kwargs.pop("trace", True))
+    fail_fast = _cli_flag(args.no_fail_fast, False, kwargs.pop("fail_fast", True))
+    include_graph_in_report = _cli_flag(
+        args.include_graph_in_report,
+        True,
+        kwargs.pop("include_graph_in_report", False),
+    )
 
     if require_config_path and not config_path:
         parser.error("--config-path is required for this DAG entrypoint.")

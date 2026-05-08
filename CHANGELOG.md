@@ -19,6 +19,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   DAGs, and partial selections.
 - Deduplicated the internal Python-file module loading used by local config and
   DAG file imports.
+- Simplified `debug_dag_cli` programmatic-default merging to reduce repeated
+  kwargs pop/override logic.
 
 ## [0.3.0] - 2026-05-08
 
