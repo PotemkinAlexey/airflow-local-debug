@@ -30,6 +30,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   environment setup.
 - Added unit coverage for the shared Python module loader, including stable
   path-hashed module names and failed-import cache cleanup.
+- Added unit coverage for strict scheduling-loop ordering, trace callbacks,
+  failure handling, logger attachment, and Airflow 3 fileloc fallback guards.
 
 ## [0.3.0] - 2026-05-08
 
