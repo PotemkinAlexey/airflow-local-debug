@@ -12,6 +12,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   artifact options.
 - Live task tracing now still wraps tasks whose custom operators define a
   non-callable `pre_execute`.
+- `airflow-debug-doctor` now applies repeatable `--env KEY=VALUE` values while
+  validating local config files and importing DAG files.
 
 ## [0.3.0] - 2026-05-08
 

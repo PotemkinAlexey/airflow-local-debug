@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from airflow_local_debug.doctor import (
     format_doctor_json,
     format_doctor_report,
     is_supported_airflow_version,
+    run_doctor,
 )
 
 
@@ -65,6 +67,26 @@ def test_check_local_config_validates_runtime_payloads(tmp_path: Path) -> None:
     assert "1 pool(s)" in check.message
 
 
+def test_check_local_config_applies_extra_env_while_loading(tmp_path: Path) -> None:
+    config_path = tmp_path / "airflow_defaults.py"
+    config_path.write_text(
+        "\n".join(
+            [
+                "import os",
+                "VARIABLES = {'TOKEN': os.environ['DOCTOR_TOKEN']}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    check = check_local_config(str(config_path), extra_env={"DOCTOR_TOKEN": "secret"})
+
+    assert check.status == "ok"
+    assert "1 variable(s)" in check.message
+    assert os.environ.get("DOCTOR_TOKEN") is None
+
+
 def test_check_local_config_rejects_non_serializable_values(tmp_path: Path) -> None:
     config_path = tmp_path / "bad_config.py"
     config_path.write_text("VARIABLES = {'BAD': object()}\n", encoding="utf-8")
@@ -73,6 +95,38 @@ def test_check_local_config_rejects_non_serializable_values(tmp_path: Path) -> N
 
     assert check.status == "fail"
     assert "not JSON-serializable" in check.message
+
+
+def test_check_dag_file_applies_extra_env_while_importing(tmp_path: Path) -> None:
+    dag_path = tmp_path / "env_dag.py"
+    dag_path.write_text(
+        "\n".join(
+            [
+                "import os",
+                "if os.environ['DOCTOR_DAG_READY'] != '1':",
+                "    raise RuntimeError('wrong env')",
+                "",
+                "class FakeDag:",
+                "    dag_id = 'demo'",
+                "    task_dict = {'a': object()}",
+                "",
+                "dag = FakeDag()",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    check = check_dag_file(
+        str(dag_path),
+        airflow_version="2.11.2",
+        airflow_available=True,
+        extra_env={"DOCTOR_DAG_READY": "1"},
+    )
+
+    assert check.status == "ok"
+    assert "dag_id: demo" in check.details
+    assert os.environ.get("DOCTOR_DAG_READY") is None
 
 
 def test_check_dag_file_loads_airflow_two_style_dag_object(tmp_path: Path) -> None:
@@ -155,5 +209,35 @@ def test_format_doctor_json_is_machine_readable() -> None:
 
 
 def test_doctor_parser_accepts_json_flag() -> None:
-    args = build_parser().parse_args(["--json"])
+    args = build_parser().parse_args(["--json", "--env", "FOO=bar", "--env", "BAZ=qux"])
     assert args.json is True
+    assert args.env == ["FOO=bar", "BAZ=qux"]
+
+
+def test_run_doctor_passes_extra_env_to_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "airflow_local_debug.doctor.check_airflow_import",
+        lambda: (DoctorCheck(name="Airflow version", status="ok", message="supported"), "2.11.2", True),
+    )
+    monkeypatch.setattr(
+        "airflow_local_debug.doctor.check_metadata_db",
+        lambda *, airflow_available: DoctorCheck(name="Metadata DB", status="ok", message="reachable"),
+    )
+
+    def fake_check_local_config(config_path: str | None, **kwargs: object) -> DoctorCheck:
+        seen["local"] = kwargs.get("extra_env")
+        return DoctorCheck(name="Local config", status="ok", message="loaded")
+
+    def fake_check_dag_file(dag_path: str | None, **kwargs: object) -> DoctorCheck:
+        seen["dag"] = kwargs.get("extra_env")
+        return DoctorCheck(name="DAG file", status="skip", message="skipped")
+
+    monkeypatch.setattr("airflow_local_debug.doctor.check_local_config", fake_check_local_config)
+    monkeypatch.setattr("airflow_local_debug.doctor.check_dag_file", fake_check_dag_file)
+
+    result = run_doctor(extra_env={"FOO": "bar"})
+
+    assert result.ok
+    assert seen == {"local": {"FOO": "bar"}, "dag": {"FOO": "bar"}}

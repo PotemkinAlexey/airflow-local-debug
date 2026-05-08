@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import traceback
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from airflow_local_debug.cli.loaders import load_cli_extra_env
 from airflow_local_debug.config.bootstrap import ensure_quiet_airflow_bootstrap
 from airflow_local_debug.config.env import _serialize_connection, _serialize_variable
 from airflow_local_debug.config.loader import get_default_config_path, load_local_config
@@ -156,52 +160,76 @@ def _resolve_config_path(config_path: str | None, *, require_config: bool) -> st
     return get_default_config_path(required=require_config)
 
 
-def check_local_config(config_path: str | None = None, *, require_config: bool = False) -> DoctorCheck:
+@contextmanager
+def _temporary_env(extra_env: Mapping[str, str] | None) -> Iterator[None]:
+    if not extra_env:
+        yield
+        return
+    updates = dict(extra_env)
+    previous: dict[str, str | None] = {key: os.environ.get(key) for key in updates}
     try:
-        resolved_path = _resolve_config_path(config_path, require_config=require_config)
-    except Exception as exc:
-        return DoctorCheck(
-            name="Local config",
-            status="fail",
-            message=str(exc),
-        )
+        os.environ.update(updates)
+        yield
+    finally:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
 
-    if resolved_path is None:
-        return DoctorCheck(
-            name="Local config",
-            status="warn",
-            message="No local config file configured; current Airflow environment will be used.",
-            details=["Set AIRFLOW_DEBUG_LOCAL_CONFIG or pass --config-path to validate local runtime data."],
-        )
 
-    try:
-        config = load_local_config(resolved_path)
-        for conn_id, payload in config.connections.items():
-            _serialize_connection(payload, conn_id=conn_id)
-        for key, value in config.variables.items():
-            _serialize_variable(value, key=key)
-        for pool_name, payload in config.pools.items():
-            int(payload.get("slots", 1))
-            include_deferred = payload.get("include_deferred")
-            if include_deferred is not None and not isinstance(include_deferred, bool):
-                raise TypeError(f"Pool {pool_name!r} include_deferred must be a bool when provided.")
-    except Exception as exc:
+def check_local_config(
+    config_path: str | None = None,
+    *,
+    require_config: bool = False,
+    extra_env: Mapping[str, str] | None = None,
+) -> DoctorCheck:
+    with _temporary_env(extra_env):
+        try:
+            resolved_path = _resolve_config_path(config_path, require_config=require_config)
+        except Exception as exc:
+            return DoctorCheck(
+                name="Local config",
+                status="fail",
+                message=str(exc),
+            )
+
+        if resolved_path is None:
+            return DoctorCheck(
+                name="Local config",
+                status="warn",
+                message="No local config file configured; current Airflow environment will be used.",
+                details=["Set AIRFLOW_DEBUG_LOCAL_CONFIG or pass --config-path to validate local runtime data."],
+            )
+
+        try:
+            config = load_local_config(resolved_path)
+            for conn_id, payload in config.connections.items():
+                _serialize_connection(payload, conn_id=conn_id)
+            for key, value in config.variables.items():
+                _serialize_variable(value, key=key)
+            for pool_name, payload in config.pools.items():
+                int(payload.get("slots", 1))
+                include_deferred = payload.get("include_deferred")
+                if include_deferred is not None and not isinstance(include_deferred, bool):
+                    raise TypeError(f"Pool {pool_name!r} include_deferred must be a bool when provided.")
+        except Exception as exc:
+            return DoctorCheck(
+                name="Local config",
+                status="fail",
+                message=f"Config validation failed: {exc}",
+                details=[f"path: {resolved_path}"],
+            )
+
         return DoctorCheck(
             name="Local config",
-            status="fail",
-            message=f"Config validation failed: {exc}",
+            status="ok",
+            message=(
+                f"Loaded {len(config.connections)} connection(s), "
+                f"{len(config.variables)} variable(s), {len(config.pools)} pool(s)."
+            ),
             details=[f"path: {resolved_path}"],
         )
-
-    return DoctorCheck(
-        name="Local config",
-        status="ok",
-        message=(
-            f"Loaded {len(config.connections)} connection(s), "
-            f"{len(config.variables)} variable(s), {len(config.pools)} pool(s)."
-        ),
-        details=[f"path: {resolved_path}"],
-    )
 
 
 def _airflow_major(version: str | None) -> int | None:
@@ -227,6 +255,7 @@ def check_dag_file(
     dag_id: str | None = None,
     airflow_version: str | None = None,
     airflow_available: bool = True,
+    extra_env: Mapping[str, str] | None = None,
 ) -> DoctorCheck:
     if not dag_path:
         return DoctorCheck(
@@ -242,10 +271,11 @@ def check_dag_file(
         )
 
     try:
-        from airflow_local_debug.execution.dag_loader import load_module_from_file, resolve_dag_from_module
+        with _temporary_env(extra_env):
+            from airflow_local_debug.execution.dag_loader import load_module_from_file, resolve_dag_from_module
 
-        module = load_module_from_file(dag_path)
-        dag = resolve_dag_from_module(module, dag_id=dag_id)
+            module = load_module_from_file(dag_path)
+            dag = resolve_dag_from_module(module, dag_id=dag_id)
     except Exception as exc:
         return DoctorCheck(
             name="DAG file",
@@ -268,7 +298,8 @@ def check_dag_file(
         )
 
     try:
-        _serialize_dag_for_airflow3(dag)
+        with _temporary_env(extra_env):
+            _serialize_dag_for_airflow3(dag)
     except Exception as exc:
         return DoctorCheck(
             name="Airflow 3 DAG serialization",
@@ -291,19 +322,21 @@ def run_doctor(
     require_config: bool = False,
     dag_path: str | None = None,
     dag_id: str | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> DoctorResult:
     checks: list[DoctorCheck] = []
 
     airflow_check, airflow_version, airflow_available = check_airflow_import()
     checks.append(airflow_check)
     checks.append(check_metadata_db(airflow_available=airflow_available))
-    checks.append(check_local_config(config_path, require_config=require_config))
+    checks.append(check_local_config(config_path, require_config=require_config, extra_env=extra_env))
     checks.append(
         check_dag_file(
             dag_path,
             dag_id=dag_id,
             airflow_version=airflow_version,
             airflow_available=airflow_available,
+            extra_env=extra_env,
         )
     )
 
@@ -348,18 +381,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dag-file", help="Optional DAG file to import and validate.")
     parser.add_argument("--dag-id", help="DAG ID to select when --dag-file contains multiple DAGs.")
+    parser.add_argument(
+        "--env",
+        dest="env",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Temporary environment variable for config and DAG import validation; may be repeated.",
+    )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of the text report.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     ensure_quiet_airflow_bootstrap()
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        extra_env = load_cli_extra_env(args.env)
+    except ValueError as exc:
+        parser.error(str(exc))
     result = run_doctor(
         config_path=args.config_path,
         require_config=args.require_config,
         dag_path=args.dag_file,
         dag_id=args.dag_id,
+        extra_env=extra_env,
     )
     print(format_doctor_json(result) if args.json else format_doctor_report(result))
     sys.exit(result.exit_code)

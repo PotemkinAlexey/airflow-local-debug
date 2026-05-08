@@ -223,4 +223,5 @@ Doctor flags:
 | `--require-config` | Fail when no config file is explicitly configured. |
 | `--dag-file` | Optional DAG file to import and validate. |
 | `--dag-id` | Select one DAG when the file defines multiple DAGs. |
+| `--env KEY=VALUE` | Temporary environment variable for config and DAG import validation. May be repeated. |
 | `--json` | Print machine-readable JSON. |
