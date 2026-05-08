@@ -5,6 +5,13 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
+### Added
+- Added scenario recipes and runnable example DAGs for successful runs,
+  deterministic failures, mocked external tasks, pytest usage, doctor, watch
+  mode, and CI artifact upload.
+- Documented the stable public API surface and the plugin contract, including
+  hook ordering, context expectations, and when to use mocks instead of plugins.
+
 ### Fixed
 - Failed local config loads no longer add misleading "Loaded local config"
   notes to `RunResult`.

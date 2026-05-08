@@ -1,0 +1,14 @@
+{
+  "mocks": [
+    {
+      "name": "local warehouse load",
+      "task_id": "load_to_warehouse",
+      "xcom": {
+        "return_value": {
+          "rows_loaded": 2,
+          "table": "analytics.orders"
+        }
+      }
+    }
+  ]
+}

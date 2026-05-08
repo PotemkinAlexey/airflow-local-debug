@@ -2,6 +2,60 @@
 
 Use the library API when you want to run DAGs from Python code, tests, or custom local tools.
 
+## Stability Contract
+
+The stable public API is the package root export list in
+`airflow_local_debug.__all__`. Those names are intended for DAG files,
+pytest suites, and local tools.
+
+Stable entrypoints:
+
+- `debug_dag`
+- `debug_dag_cli`
+- `debug_dag_file_cli`
+- `debug_dag_from_file`
+- `run_full_dag`
+- `run_full_dag_from_file`
+- `list_dags_from_file`
+- `watch_dag_file`
+- `run_doctor`
+
+Stable result and config types:
+
+- `RunResult`
+- `TaskRunInfo`
+- `TaskMockInfo`
+- `TaskMockRule`
+- `DeferrableTaskInfo`
+- `DagFileInfo`
+- `LocalConfig`
+- `AirflowLocalRunner`
+
+Stable helper APIs:
+
+- task mocks: `load_task_mock_rules`, `task_mock_rules_from_payload`
+- reports: `format_run_report`, `print_run_report`, `format_run_gantt`,
+  `write_run_artifacts`, `write_xcom_snapshot`
+- graphs: `format_dag_graph`, `print_dag_graph`, `render_dag_svg`,
+  `write_dag_svg`, `format_dag_list`
+- config: `bootstrap_airflow_env`, `load_local_config`,
+  `get_default_config_path`, `parse_dotenv_file`, `parse_dotenv_text`,
+  `discover_dotenv_path`
+- bootstrap: `silenced_airflow_bootstrap_warnings`,
+  `silence_airflow_bootstrap_warnings`, `ensure_quiet_airflow_bootstrap`
+- doctor output: `format_doctor_report`, `format_doctor_json`
+- inspection: `detect_deferrable_tasks`, `get_airflow_version`
+
+The `src/airflow_local_debug/execution`, `reporting`, `config`, and `cli`
+modules are internal implementation boundaries unless a symbol is re-exported
+from the package root and listed above. Internal helpers can change between
+minor versions when Airflow compatibility or architecture requires it.
+
+Back-compat re-exports such as `StepTracer`, `DebugPluginManager`, and
+`live_task_trace` remain importable today, but they are not part of the
+stability promise. Prefer the stable entrypoints unless you are extending the
+project itself.
+
 ## Convenience Entrypoints
 
 ### `debug_dag`

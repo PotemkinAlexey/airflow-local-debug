@@ -4,6 +4,9 @@ This guide shows each main `airflow-local-debug` capability as a practical
 workflow. Use it as a cookbook: pick the feature you need, copy the closest
 example, then adjust paths and task ids for your DAG.
 
+For complete end-to-end workflows using runnable DAG files from this
+repository, start with [Recipes](recipes.md) and [Example DAGs](../examples/README.md).
+
 ## Run a DAG from a file
 
 Use `airflow-debug-run` when you have a normal Airflow DAG file and want to
@@ -869,4 +872,3 @@ debug_dag_file_cli()
 
 Prefer the context manager in reusable library code. `ensure_quiet_airflow_bootstrap()`
 may re-exec the process and is intended for one-shot command-line entrypoints.
-
