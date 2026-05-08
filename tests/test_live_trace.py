@@ -18,8 +18,18 @@ class _FakeTask:
         return f"result-of-{self.task_id}"
 
 
+class _FakeTaskWithoutPreExecute:
+    pre_execute = None
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+
+    def execute(self, context: dict[str, Any]) -> str:
+        return f"result-of-{self.task_id}"
+
+
 class _FakeDag:
-    def __init__(self, tasks: list[_FakeTask]) -> None:
+    def __init__(self, tasks: list[Any]) -> None:
         self.task_dict = {task.task_id: task for task in tasks}
 
 
@@ -64,6 +74,23 @@ def test_live_task_trace_is_idempotent_for_repeated_wrap() -> None:
 
     # Original method must be restored even after the duplicate wrap call.
     assert task.execute.__func__ is _FakeTask.execute  # type: ignore[attr-defined]
+
+
+def test_live_task_trace_wraps_task_without_callable_pre_execute() -> None:
+    task = _FakeTaskWithoutPreExecute("a")
+    dag = _FakeDag([task])
+    original_execute = task.execute
+
+    plugin = _RecordingPlugin()
+    manager = DebugPluginManager([plugin])
+
+    with live_task_trace(dag, plugin_manager=manager):
+        assert task.execute is not original_execute
+        assert task.execute({}) == "result-of-a"
+
+    assert task.pre_execute is None
+    assert task.execute.__func__ is _FakeTaskWithoutPreExecute.execute  # type: ignore[attr-defined]
+    assert plugin.events == [("before", "a"), ("after", "a")]
 
 
 def test_live_task_trace_rejects_conflicting_inputs() -> None:

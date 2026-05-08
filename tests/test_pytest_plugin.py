@@ -36,6 +36,43 @@ def test_run_dag_with_dag_object_dispatches_to_run_full_dag(monkeypatch: pytest.
     assert result.ok
 
 
+def test_run_dag_with_artifacts_writes_outputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_full_dag(dag: Any, **kwargs: Any) -> RunResult:
+        captured["dag"] = dag
+        captured["kwargs"] = kwargs
+        return RunResult(
+            dag_id="demo",
+            state="success",
+            graph_ascii="demo\n  task",
+            graph_svg_path=str(kwargs["graph_svg_path"]),
+            xcoms={"task": {"return_value": {"rows": 3}}},
+        )
+
+    monkeypatch.setattr(pytest_plugin, "run_full_dag", fake_run_full_dag)
+
+    class _Dag:
+        dag_id = "demo"
+
+    runner = AirflowLocalRunner()
+    result = runner.run_dag(
+        _Dag(),
+        collect_xcoms=False,
+        report_dir=tmp_path / "artifacts",
+        xcom_json_path=tmp_path / "xcom.json",
+        include_graph_in_report=True,
+    )
+
+    assert result.ok
+    assert captured["kwargs"]["collect_xcoms"] is True
+    assert captured["kwargs"]["graph_svg_path"] == tmp_path / "artifacts" / "graph.svg"
+    assert (tmp_path / "xcom.json").exists()
+    assert (tmp_path / "artifacts" / "result.json").exists()
+    assert (tmp_path / "artifacts" / "report.md").exists()
+    assert "Graph SVG:" in (tmp_path / "artifacts" / "report.md").read_text(encoding="utf-8")
+
+
 def test_run_dag_with_string_path_dispatches_to_file_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

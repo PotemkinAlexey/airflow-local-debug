@@ -5,6 +5,14 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 
 ## [Unreleased]
 
+### Fixed
+- Failed local config loads no longer add misleading "Loaded local config"
+  notes to `RunResult`.
+- The pytest `airflow_local_runner` fixture now supports report and XCom
+  artifact options.
+- Live task tracing now still wraps tasks whose custom operators define a
+  non-callable `pre_execute`.
+
 ## [0.3.0] - 2026-05-08
 
 ### Added

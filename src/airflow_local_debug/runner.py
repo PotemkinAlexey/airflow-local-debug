@@ -102,12 +102,14 @@ def run_full_dag(
 
     try:
         if selected_config_path:
-            notes.append(f"Loaded local config from {selected_config_path}")
             local_config = load_local_config(selected_config_path)
+            notes.append(f"Loaded local config from {selected_config_path}")
         else:
             notes.append("No local config file provided; using current Airflow environment.")
             local_config = LocalConfig()
     except Exception as exc:
+        if selected_config_path:
+            notes.append(f"Failed to load local config from {selected_config_path}")
         error_raw = traceback.format_exc()
         result = RunResult(
             dag_id=getattr(dag, "dag_id", "<unknown>"),
@@ -450,13 +452,13 @@ def run_full_dag_from_file(
     selected_config_path = config_path if config_path is not None else get_default_config_path(required=False)
     notes: list[str] = []
 
-    if selected_config_path:
-        notes.append(f"Loaded local config from {selected_config_path}")
-    else:
+    if not selected_config_path:
         notes.append("No local config file provided; using current Airflow environment.")
 
     try:
         with bootstrap_airflow_env(config_path=selected_config_path, extra_env=extra_env) as local_config:
+            if selected_config_path:
+                notes.append(f"Loaded local config from {selected_config_path}")
             module = load_module_from_file(dag_file)
             dag = resolve_dag_from_module(module, dag_id=dag_id)
             # extra_env is already applied by the outer bootstrap above (needed for DAG import).
@@ -480,6 +482,8 @@ def run_full_dag_from_file(
                 graph_svg_path=graph_svg_path,
             )
     except Exception as exc:
+        if selected_config_path and not any(note == f"Loaded local config from {selected_config_path}" for note in notes):
+            notes.append(f"Failed to load local config from {selected_config_path}")
         error_raw = traceback.format_exc()
         return RunResult(
             dag_id=dag_id or "<unknown>",

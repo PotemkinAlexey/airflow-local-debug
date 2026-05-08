@@ -33,7 +33,7 @@ from airflow_local_debug.execution.result import (
     task_state_buckets,
 )
 from airflow_local_debug.execution.state import duration_seconds, serialize_datetime, state_token, task_instance_label
-from airflow_local_debug.models import DagFileInfo, RunResult, TaskRunInfo
+from airflow_local_debug.models import DagFileInfo, LocalConfig, RunResult, TaskRunInfo
 
 # --- helpers --------------------------------------------------------------
 
@@ -964,6 +964,40 @@ def test_debug_dag_writes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) 
     assert (tmp_path / "artifacts" / "report.md").exists()
     assert (tmp_path / "artifacts" / "graph.txt").exists()
     assert "Graph SVG:" in (tmp_path / "artifacts" / "report.md").read_text(encoding="utf-8")
+
+
+def test_run_full_dag_config_load_failure_does_not_claim_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_load_local_config(config_path: str) -> LocalConfig:
+        raise RuntimeError(f"cannot load {config_path}")
+
+    monkeypatch.setattr(runner, "load_local_config", fake_load_local_config)
+
+    result = runner.run_full_dag(FakeDag(task_dict={}), config_path="/tmp/bad_config.py")
+
+    assert "Loaded local config from /tmp/bad_config.py" not in result.notes
+    assert "Failed to load local config from /tmp/bad_config.py" in result.notes
+    assert result.exception is not None
+    assert "cannot load /tmp/bad_config.py" in result.exception
+
+
+def test_run_full_dag_from_file_config_load_failure_does_not_claim_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingBootstrap:
+        def __enter__(self) -> LocalConfig:
+            raise RuntimeError("bootstrap failed")
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+    monkeypatch.setattr(runner, "bootstrap_airflow_env", lambda **kwargs: FailingBootstrap())
+
+    result = runner.run_full_dag_from_file("/tmp/demo_dag.py", config_path="/tmp/bad_config.py")
+
+    assert "Loaded local config from /tmp/bad_config.py" not in result.notes
+    assert "Failed to load local config from /tmp/bad_config.py" in result.notes
+    assert result.exception is not None
+    assert "bootstrap failed" in result.exception
 
 
 def test_debug_dag_file_cli_passes_report_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

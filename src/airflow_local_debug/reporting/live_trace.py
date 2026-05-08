@@ -120,8 +120,9 @@ class LiveTaskTraceSession(AbstractContextManager["LiveTaskTraceSession"]):
         bound_execute = getattr(task, "execute", None)
         bound_post = getattr(task, "post_execute", None)
         bound_render = getattr(task, "render_template_fields", None)
+        callable_pre = bound_pre if callable(bound_pre) else None
 
-        if not callable(bound_pre) or not callable(bound_execute):
+        if not callable(bound_execute):
             return
 
         self._originals[id(task)] = {
@@ -132,16 +133,6 @@ class LiveTaskTraceSession(AbstractContextManager["LiveTaskTraceSession"]):
         }
         for callback_attr in _CALLBACK_ATTRS:
             self._originals[id(task)][callback_attr] = task.__dict__.get(callback_attr, _MISSING)
-
-        def traced_pre_execute(bound_self: Any, *args: Any, **kwargs: Any) -> Any:
-            context = _extract_context(args, kwargs)
-            key = self._ensure_before_task(bound_self, context)
-            try:
-                return bound_pre(*args, **kwargs)
-            except BaseException as exc:
-                self.plugin_manager.on_task_error(bound_self, context, exc)
-                self._finish_task(key)
-                raise
 
         def traced_execute(bound_self: Any, *args: Any, **kwargs: Any) -> Any:
             context = _extract_context(args, kwargs)
@@ -182,7 +173,18 @@ class LiveTaskTraceSession(AbstractContextManager["LiveTaskTraceSession"]):
                 self._wrap_task(mapped_clone)
             return result
 
-        task.pre_execute = MethodType(traced_pre_execute, task)
+        if callable_pre is not None:
+            def traced_pre_execute(bound_self: Any, *args: Any, **kwargs: Any) -> Any:
+                context = _extract_context(args, kwargs)
+                key = self._ensure_before_task(bound_self, context)
+                try:
+                    return callable_pre(*args, **kwargs)
+                except BaseException as exc:
+                    self.plugin_manager.on_task_error(bound_self, context, exc)
+                    self._finish_task(key)
+                    raise
+
+            task.pre_execute = MethodType(traced_pre_execute, task)
         task.execute = MethodType(traced_execute, task)
         if callable(bound_post):
             task.post_execute = MethodType(traced_post_execute, task)
