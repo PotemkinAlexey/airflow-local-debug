@@ -96,6 +96,14 @@ debug_dag(dag, extra_env={"FEATURE_FLAG": "local"})
 
 `extra_env` is applied only for the local run and restored afterward.
 
+Local runs set `AIRFLOW__CORE__LOAD_EXAMPLES=False` by default to keep example
+DAGs out of local debug sessions. Override it explicitly when needed:
+
+```bash
+airflow-debug-run /absolute/path/to/my_dag.py \
+  --env AIRFLOW__CORE__LOAD_EXAMPLES=True
+```
+
 ## .env Files
 
 Pull credentials and feature flags from a `.env` file instead of duplicating

@@ -56,8 +56,6 @@ from airflow_local_debug.reporting.traceback_utils import format_pretty_exceptio
 _log = logging.getLogger(__name__)
 
 
-
-
 def list_dags_from_file(
     dag_file: str,
     *,

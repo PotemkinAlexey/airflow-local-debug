@@ -21,6 +21,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   DAG file imports.
 - Simplified `debug_dag_cli` programmatic-default merging to reduce repeated
   kwargs pop/override logic.
+- Documented that local runs set `AIRFLOW__CORE__LOAD_EXAMPLES=False` by
+  default and how to override it.
 
 ## [0.3.0] - 2026-05-08
 
