@@ -23,6 +23,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   kwargs pop/override logic.
 - Documented that local runs set `AIRFLOW__CORE__LOAD_EXAMPLES=False` by
   default and how to override it.
+- Added unit coverage for ASCII and SVG DAG graph rendering, including empty
+  DAGs, render-size caps, TaskGroup labels, escaping, edges, and SVG writes.
 
 ## [0.3.0] - 2026-05-08
 
