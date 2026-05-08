@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import json
 import os
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from airflow_local_debug._module_loading import load_python_module
 from airflow_local_debug.models import LocalConfig
 
 _CONFIG_ENV_VARS = ("AIRFLOW_DEBUG_LOCAL_CONFIG", "RUNBOOK_LOCAL_CONFIG")
@@ -41,26 +39,12 @@ def get_default_config_path(*, required: bool = False) -> str | None:
 
 
 def _load_module_from_path(filepath: str) -> ModuleType:
-    abs_path = str(Path(filepath).expanduser().resolve())
-    if not os.path.exists(abs_path):
-        raise FileNotFoundError(f"Config file not found: {abs_path}")
-
-    module_name = f"airflow_debug_config_{hashlib.md5(abs_path.encode()).hexdigest()}"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-
-    spec = importlib.util.spec_from_file_location(module_name, abs_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load module spec for {abs_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(module_name, None)
-        raise
-    return module
+    return load_python_module(
+        filepath,
+        module_prefix="airflow_debug_config",
+        missing_message="Config file not found: {path}",
+        import_error_message="Unable to load module spec for {path}",
+    )
 
 
 def _normalize_connection_dict(raw: dict[str, Any]) -> dict[str, Any]:

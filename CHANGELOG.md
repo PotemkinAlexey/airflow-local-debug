@@ -17,6 +17,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - Added unit coverage around the `execute_full_dag` orchestrator routing paths
   for strict `dag.test`, non-strict `dag.test`, legacy `dag.run`, unsupported
   DAGs, and partial selections.
+- Deduplicated the internal Python-file module loading used by local config and
+  DAG file imports.
 
 ## [0.3.0] - 2026-05-08
 

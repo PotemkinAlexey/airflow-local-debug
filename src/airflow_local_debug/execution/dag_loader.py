@@ -8,36 +8,23 @@ same file is loaded from multiple call sites within a single process.
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from airflow_local_debug._module_loading import load_python_module
 from airflow_local_debug.models import DagFileInfo
 
 
 def load_module_from_file(path: str) -> ModuleType:
     """Import a Python file by absolute path and return the resulting module."""
-    resolved = str(Path(path).expanduser().resolve())
-    if not Path(resolved).exists():
-        raise FileNotFoundError(f"DAG file not found: {resolved}")
-
-    module_name = f"airflow_debug_dag_{hashlib.md5(resolved.encode()).hexdigest()}"
-    spec = importlib.util.spec_from_file_location(module_name, resolved)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load DAG module from {resolved}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-    except Exception:
-        sys.modules.pop(module_name, None)
-        raise
-    return module
+    return load_python_module(
+        path,
+        module_prefix="airflow_debug_dag",
+        missing_message="DAG file not found: {path}",
+        import_error_message="Unable to load DAG module from {path}",
+    )
 
 
 def dag_candidates_from_module(module: ModuleType) -> list[Any]:
