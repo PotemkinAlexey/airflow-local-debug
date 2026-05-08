@@ -26,6 +26,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - Added unit coverage for ASCII and SVG DAG graph rendering, including empty
   DAGs, render-size caps, TaskGroup labels, escaping, edges, and SVG writes.
 - Added unit coverage for console run preamble rendering.
+- Added unit coverage for Airflow bootstrap warning suppression and re-exec
+  environment setup.
 
 ## [0.3.0] - 2026-05-08
 
