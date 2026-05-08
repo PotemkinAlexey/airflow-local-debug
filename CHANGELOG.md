@@ -28,6 +28,8 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
 - Added unit coverage for console run preamble rendering.
 - Added unit coverage for Airflow bootstrap warning suppression and re-exec
   environment setup.
+- Added unit coverage for the shared Python module loader, including stable
+  path-hashed module names and failed-import cache cleanup.
 
 ## [0.3.0] - 2026-05-08
 
