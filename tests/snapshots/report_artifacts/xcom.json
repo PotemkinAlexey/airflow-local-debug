@@ -1,0 +1,8 @@
+{
+  "load_to_warehouse": {
+    "return_value": {
+      "rows_loaded": 2,
+      "table": "analytics.orders"
+    }
+  }
+}

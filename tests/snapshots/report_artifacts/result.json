@@ -1,0 +1,73 @@
+{
+  "airflow_version": "3.2.1",
+  "backend": "dag.test.strict",
+  "config_path": "/repo/examples/airflow_defaults.py",
+  "dag_id": "orders_success",
+  "deferrables": [],
+  "exception": null,
+  "exception_raw": null,
+  "exception_was_logged": false,
+  "graph_ascii": "orders_success\n  extract_orders -> transform_orders\n  transform_orders -> load_to_warehouse",
+  "graph_svg_path": "/repo/.tmp/orders-success-report/graph.svg",
+  "logical_date": "2026-05-07T00:00:00+00:00",
+  "mocks": [
+    {
+      "mode": "success",
+      "rule_name": "local warehouse load",
+      "task_id": "load_to_warehouse",
+      "xcom_keys": [
+        "return_value"
+      ]
+    }
+  ],
+  "notes": [
+    "Loaded local config from /repo/examples/airflow_defaults.py"
+  ],
+  "run_id": "manual__2026-05-07T00:00:00+00:00",
+  "selected_tasks": [
+    "extract_orders",
+    "transform_orders",
+    "load_to_warehouse"
+  ],
+  "state": "success",
+  "tasks": [
+    {
+      "duration_seconds": 0.25,
+      "end_date": null,
+      "map_index": null,
+      "mocked": false,
+      "start_date": null,
+      "state": "success",
+      "task_id": "extract_orders",
+      "try_number": 1
+    },
+    {
+      "duration_seconds": 0.5,
+      "end_date": null,
+      "map_index": null,
+      "mocked": false,
+      "start_date": null,
+      "state": "success",
+      "task_id": "transform_orders",
+      "try_number": 1
+    },
+    {
+      "duration_seconds": 0.75,
+      "end_date": null,
+      "map_index": null,
+      "mocked": true,
+      "start_date": null,
+      "state": "success",
+      "task_id": "load_to_warehouse",
+      "try_number": 1
+    }
+  ],
+  "xcoms": {
+    "load_to_warehouse": {
+      "return_value": {
+        "rows_loaded": 2,
+        "table": "analytics.orders"
+      }
+    }
+  }
+}

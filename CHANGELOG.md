@@ -11,6 +11,9 @@ The format is loosely based on Keep a Changelog and the project follows SemVer.
   mode, and CI artifact upload.
 - Documented the stable public API surface and the plugin contract, including
   hook ordering, context expectations, and when to use mocks instead of plugins.
+- Added golden snapshot coverage for the standard report artifact set:
+  `report.md`, `result.json`, `tasks.csv`, `junit.xml`, `graph.txt`, and
+  `xcom.json`.
 
 ### Fixed
 - Failed local config loads no longer add misleading "Loaded local config"

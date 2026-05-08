@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="orders_success" tests="3" failures="0" errors="0" skipped="0" time="1.500000" id="manual__2026-05-07T00:00:00+00:00">
+  <testcase classname="orders_success" name="extract_orders" time="0.250000" />
+  <testcase classname="orders_success" name="transform_orders" time="0.500000" />
+  <testcase classname="orders_success" name="load_to_warehouse" time="0.750000" />
+</testsuite>

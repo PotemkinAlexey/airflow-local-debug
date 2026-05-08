@@ -1,0 +1,4 @@
+task_id,map_index,state,try_number,start_date,end_date,duration_seconds,mocked
+extract_orders,,success,1,,,0.25,false
+transform_orders,,success,1,,,0.5,false
+load_to_warehouse,,success,1,,,0.75,true
